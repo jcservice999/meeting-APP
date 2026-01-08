@@ -68,11 +68,11 @@
 .participant-grid {
     flex: 1;
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
     gap: 12px;
     padding: 12px;
     overflow-y: auto;
     background: #1a1a1a;
+    grid-auto-rows: 1fr;
 }
 
 /* 根據參與者數量調整網格 */
@@ -84,17 +84,27 @@
     grid-template-columns: repeat(2, 1fr);
 }
 
-.participant-grid[data-count="3"],
+.participant-grid[data-count="3"] {
+    grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+}
+
 .participant-grid[data-count="4"] {
     grid-template-columns: repeat(2, 1fr);
+    grid-template-rows: repeat(2, 1fr);
 }
 
 .participant-grid[data-count="5"],
-.participant-grid[data-count="6"],
+.participant-grid[data-count="6"] {
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+}
+
 .participant-grid[data-count="7"],
 .participant-grid[data-count="8"],
 .participant-grid[data-count="9"] {
     grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(3, 1fr);
 }
 
 .participant-card {
