@@ -1,0 +1,329 @@
+/* 會議室樣式 - Zoom 風格 */
+.meeting-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: #1a1a1a;
+}
+
+/* 頂部工具列 */
+.meeting-header {
+    background: rgba(30, 30, 30, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding: 0.8rem 1.5rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    z-index: 10;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.header-left h1 {
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.participant-count {
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0.3rem 0.8rem;
+    border-radius: 20px;
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+}
+
+.language-select {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    padding: 0.4rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+}
+
+/* 主要內容區 */
+.meeting-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    background: #1a1a1a;
+}
+
+/* 參與者網格 - Zoom 風格 */
+.participant-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 8px;
+    padding: 8px;
+    overflow-y: auto;
+    background: #1a1a1a;
+}
+
+/* 根據參與者數量調整網格 */
+.participant-grid[data-count="1"] {
+    grid-template-columns: 1fr;
+}
+
+.participant-grid[data-count="2"] {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.participant-grid[data-count="3"],
+.participant-grid[data-count="4"] {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.participant-grid[data-count="5"],
+.participant-grid[data-count="6"] {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.participant-card {
+    background: #262626;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.2s ease;
+    aspect-ratio: 16 / 9;
+}
+
+.participant-card.speaking {
+    border-color: #10b981;
+    box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+}
+
+.participant-photo {
+    width: 100%;
+    height: 100%;
+    background: #1a1a1a;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+}
+
+.participant-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.photo-placeholder {
+    font-size: 4rem;
+    color: rgba(255, 255, 255, 0.3);
+    font-weight: 600;
+}
+
+.participant-name {
+    position: absolute;
+    bottom: 8px;
+    left: 8px;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    padding: 4px 12px;
+    border-radius: 4px;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: #fff;
+    z-index: 2;
+}
+
+/* 字幕容器 - 固定在底部 */
+.caption-container {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    transition: all 0.3s ease;
+    z-index: 20;
+    max-height: 150px;
+}
+
+.caption-container.expanded {
+    max-height: 100vh;
+    height: 100vh;
+}
+
+.caption-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.5rem 1rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.5);
+}
+
+.caption-header span {
+    font-size: 0.9rem;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.btn-toggle {
+    background: transparent;
+    border: none;
+    color: rgba(255, 255, 255, 0.6);
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0.3rem 0.8rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.btn-toggle:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+}
+
+/* 字幕條 - 顯示最近 3 行 */
+.caption-bar {
+    padding: 0.8rem 1rem;
+    max-height: 100px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.caption-item {
+    animation: slideIn 0.3s ease;
+    line-height: 1.4;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.caption-speaker {
+    color: #60a5fa;
+    font-weight: 600;
+    margin-right: 0.5rem;
+}
+
+.caption-text {
+    color: #fff;
+}
+
+/* 完整字幕 - 展開時全螢幕 */
+.caption-full {
+    display: none;
+    padding: 1rem;
+    height: calc(100vh - 60px);
+    overflow-y: auto;
+}
+
+.caption-container.expanded .caption-bar {
+    display: none;
+}
+
+.caption-container.expanded .caption-full {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+}
+
+.caption-item-full {
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 8px;
+    padding: 1rem;
+    border-left: 3px solid #60a5fa;
+}
+
+.caption-item-full .caption-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+    padding: 0;
+    border: none;
+    background: transparent;
+}
+
+.caption-item-full .caption-speaker {
+    color: #60a5fa;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.caption-time {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.85rem;
+}
+
+.caption-item-full .caption-text {
+    color: #fff;
+    line-height: 1.6;
+}
+
+/* 響應式設計 */
+@media (max-width: 768px) {
+    .meeting-header {
+        padding: 0.6rem 1rem;
+    }
+
+    .header-left h1 {
+        font-size: 1rem;
+    }
+
+    .participant-grid {
+        grid-template-columns: 1fr !important;
+        gap: 6px;
+        padding: 6px;
+    }
+
+    .photo-placeholder {
+        font-size: 3rem;
+    }
+
+    .caption-container {
+        max-height: 120px;
+    }
+}
+
+/* 滾動條 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+}

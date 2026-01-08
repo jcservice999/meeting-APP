@@ -1,0 +1,628 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>會議室 (多人) - 即時語音轉文字</title>
+    <link rel="stylesheet" href="styles/common.css">
+    <link rel="stylesheet" href="styles/meeting.css">
+
+    <!-- Supabase SDK -->
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+</head>
+
+<body>
+    <div class="meeting-container">
+        <!-- 頂部工具列 -->
+        <header class="meeting-header">
+            <div class="header-left">
+                <h1>🎤 會議室 (多人模式)</h1>
+                <span id="participantCount" class="participant-count">載入中...</span>
+            </div>
+            <div class="header-right">
+                <select id="languageSelect" class="language-select">
+                    <option value="zh-TW">中文</option>
+                    <option value="en-US">English</option>
+                </select>
+                <button id="startBtn" class="btn-primary">開始錄音</button>
+                <button id="leaveBtn" class="btn-danger">離開會議</button>
+            </div>
+        </header>
+
+        <!-- 主要內容區 -->
+        <main class="meeting-main">
+            <!-- 參與者網格 -->
+            <div id="participantGrid" class="participant-grid">
+                <!-- 動態生成 -->
+            </div>
+        </main>
+
+        <!-- 字幕條 - 固定在底部 -->
+        <div id="captionContainer" class="caption-container">
+            <div class="caption-header">
+                <span>即時字幕 (多人同步)</span>
+                <button id="toggleCaptions" class="btn-toggle">展開 ▲</button>
+            </div>
+            <div id="captionBar" class="caption-bar">
+                點擊「開始錄音」開始...
+            </div>
+            <div id="captionFull" class="caption-full">
+                <!-- 完整對話顯示 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        console.log('=== 多人會議室初始化 ===');
+
+        // 固定的會議室 ID（所有人都加入這個房間）
+        const MEETING_ID = 'main-room';
+
+        // 初始化 Supabase
+        const { createClient } = supabase;
+        const supabaseClient = createClient(
+            'https://inzqsdelrwxxlbcumaiw.supabase.co',
+            'sb_publishable_B6icGBhWdbQ9a73nIrHKpQ_YWsZKzZs'
+        );
+
+        let currentUser = null;
+        let recognition = null;
+        let isRecording = false;
+        let isSpeaking = false;
+        let audioContext = null;
+        let analyser = null;
+        let animationId = null;
+        let participants = new Map();
+        let participantsChannel = null;
+        let captionsChannel = null;
+
+        // 檢查登入狀態並加入會議
+        supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
+            if (!session) {
+                window.location.href = 'index.html';
+                return;
+            }
+
+            currentUser = session.user;
+            console.log('✅ 使用者已登入', currentUser.email);
+
+            // 加入會議室
+            await joinMeeting();
+
+            // 訂閱參與者變化
+            subscribeToParticipants();
+
+            // 訂閱字幕
+            subscribeToCaptions();
+
+            // 初始化語音識別
+            initSpeechRecognition();
+
+            // 載入現有參與者
+            await loadParticipants();
+        });
+
+        // 加入會議室
+        async function joinMeeting() {
+            try {
+                const { error } = await supabaseClient
+                    .from('participants')
+                    .upsert({
+                        meeting_id: MEETING_ID,
+                        user_id: currentUser.id,
+                        user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                        photo_url: currentUser.user_metadata?.avatar_url,
+                        status: 'online',
+                        is_speaking: false
+                    }, {
+                        onConflict: 'meeting_id,user_id'
+                    });
+
+                if (error) throw error;
+                console.log('✅ 已加入會議室');
+            } catch (error) {
+                console.error('加入會議失敗:', error);
+            }
+        }
+
+        // 訂閱參與者變化
+        function subscribeToParticipants() {
+            participantsChannel = supabaseClient
+                .channel('participants-changes')
+                .on('postgres_changes', {
+                    event: '*',
+                    schema: 'public',
+                    table: 'participants',
+                    filter: `meeting_id=eq.${MEETING_ID}`
+                }, (payload) => {
+                    console.log('參與者變化:', payload);
+                    loadParticipants();
+                })
+                .subscribe();
+        }
+
+        // 訂閱字幕
+        function subscribeToCaptions() {
+            captionsChannel = supabaseClient
+                .channel('captions-changes')
+                .on('postgres_changes', {
+                    event: 'INSERT',
+                    schema: 'public',
+                    table: 'captions',
+                    filter: `meeting_id=eq.${MEETING_ID}`
+                }, (payload) => {
+                    console.log('新字幕:', payload.new);
+                    displayRemoteCaption(payload.new);
+                })
+                .subscribe();
+        }
+
+        // 載入參與者列表
+        async function loadParticipants() {
+            try {
+                const { data, error } = await supabaseClient
+                    .from('participants')
+                    .select('*')
+                    .eq('meeting_id', MEETING_ID)
+                    .eq('status', 'online');
+
+                if (error) throw error;
+
+                participants.clear();
+                data.forEach(p => participants.set(p.user_id, p));
+
+                updateParticipantGrid();
+                updateParticipantCount();
+            } catch (error) {
+                console.error('載入參與者失敗:', error);
+            }
+        }
+
+        // 更新參與者網格
+        function updateParticipantGrid() {
+            const grid = document.getElementById('participantGrid');
+            grid.innerHTML = '';
+
+            // 設定 data-count 屬性供 CSS 使用
+            grid.setAttribute('data-count', participants.size);
+
+            participants.forEach((participant, userId) => {
+                const isMe = userId === currentUser.id;
+                const card = document.createElement('div');
+                card.className = 'participant-card';
+                card.id = `participant-${userId}`;
+
+                if (participant.is_speaking) {
+                    card.classList.add('speaking');
+                }
+
+                card.innerHTML = `
+                    <div class="participant-photo">
+                        ${participant.photo_url
+                        ? `<img src="${participant.photo_url}" alt="${participant.user_name}">`
+                        : `<div class="photo-placeholder">${participant.user_name.charAt(0).toUpperCase()}</div>`
+                    }
+                        <div class="participant-name">${participant.user_name}${isMe ? ' (我)' : ''}</div>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        // 更新參與者計數
+        function updateParticipantCount() {
+            document.getElementById('participantCount').textContent = `${participants.size} 人`;
+        }
+
+        // 初始化語音識別
+        function initSpeechRecognition() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                alert('您的瀏覽器不支援語音識別功能。請使用 Chrome 或 Edge 瀏覽器。');
+                return;
+            }
+
+            const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognitionAPI();
+
+            recognition.continuous = true;
+            recognition.interimResults = true;
+            recognition.maxAlternatives = 3;
+            recognition.lang = 'zh-TW';
+
+            let finalTranscriptBuffer = '';
+            let lastFinalTime = Date.now();
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                let finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                if (interimTranscript) {
+                    showInterimCaption(interimTranscript);
+                }
+
+                if (finalTranscript) {
+                    finalTranscriptBuffer += finalTranscript + ' ';
+                    lastFinalTime = Date.now();
+
+                    // 立即顯示本地字幕（不等資料庫）
+                    showLocalCaption(finalTranscript);
+
+                    // 減少延遲，更快儲存
+                    setTimeout(() => {
+                        if (Date.now() - lastFinalTime >= 500 && finalTranscriptBuffer.trim()) {
+                            saveCaption(finalTranscriptBuffer.trim());
+                            finalTranscriptBuffer = '';
+                        }
+                    }, 600);
+                }
+            };
+
+            let isRestarting = false;
+
+            recognition.onerror = (event) => {
+                console.error('語音識別錯誤:', event.error);
+
+                // 嚴重錯誤，停止錄音
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    alert('無法存取麥克風，請檢查權限設定');
+                    stopRecording();
+                    return;
+                }
+
+                // 可恢復的錯誤，嘗試重啟
+                if ((event.error === 'no-speech' || event.error === 'aborted' || event.error === 'network') && isRecording && !isRestarting) {
+                    isRestarting = true;
+                    setTimeout(() => {
+                        if (isRecording) {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.error('重啟失敗:', e);
+                            }
+                        }
+                        isRestarting = false;
+                    }, 300);
+                }
+            };
+
+            recognition.onend = () => {
+                console.log('語音識別結束');
+                if (isRecording && !isRestarting) {
+                    isRestarting = true;
+                    setTimeout(() => {
+                        if (isRecording) {
+                            try {
+                                recognition.start();
+                            } catch (e) {
+                                console.error('重啟失敗:', e);
+                            }
+                        }
+                        isRestarting = false;
+                    }, 300);
+                }
+            };
+
+            console.log('✅ 語音識別已初始化');
+        }
+
+        // 初始化說話者檢測
+        async function initSpeakerDetection() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    audio: {
+                        echoCancellation: true,
+                        noiseSuppression: true,
+                        autoGainControl: true
+                    }
+                });
+
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 512;
+                analyser.smoothingTimeConstant = 0.8;
+
+                const microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+
+                detectSpeaking();
+                console.log('✅ 說話者檢測已初始化');
+                return true;
+            } catch (error) {
+                console.error('無法存取麥克風:', error);
+                return false;
+            }
+        }
+
+        // 檢測說話
+        function detectSpeaking() {
+            if (!analyser) return;
+
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+            const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
+
+            const speaking = average > 25;
+            if (speaking !== isSpeaking) {
+                isSpeaking = speaking;
+                updateSpeakingStatus(speaking);
+            }
+
+            animationId = requestAnimationFrame(detectSpeaking);
+        }
+
+        // 更新說話狀態
+        async function updateSpeakingStatus(speaking) {
+            const card = document.getElementById(`participant-${currentUser.id}`);
+            if (card) {
+                if (speaking) {
+                    card.classList.add('speaking');
+                } else {
+                    card.classList.remove('speaking');
+                }
+            }
+
+            // 更新資料庫
+            try {
+                await supabaseClient
+                    .from('participants')
+                    .update({ is_speaking: speaking })
+                    .eq('meeting_id', MEETING_ID)
+                    .eq('user_id', currentUser.id);
+            } catch (error) {
+                console.error('更新說話狀態失敗:', error);
+            }
+        }
+
+        // 顯示即時字幕（本地）
+        function showInterimCaption(text) {
+            const captionBar = document.getElementById('captionBar');
+            // 使用 user_id 來區分不同使用者的即時字幕
+            const interimId = `interim-${currentUser.id}`;
+            let interimEl = captionBar.querySelector(`#${interimId}`);
+
+            if (!interimEl) {
+                interimEl = document.createElement('div');
+                interimEl.id = interimId;
+                interimEl.className = 'caption-item interim-caption';
+                interimEl.style.opacity = '0.5';
+                captionBar.appendChild(interimEl);
+            }
+
+            const userName = currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || '我';
+            interimEl.innerHTML = `
+                <span class="caption-speaker">${userName}:</span>
+                <span class="caption-text">${escapeHtml(text)}</span>
+            `;
+
+            captionBar.scrollTop = captionBar.scrollHeight;
+        }
+
+        // 立即顯示本地確定字幕（不等資料庫）
+        function showLocalCaption(text) {
+            const captionBar = document.getElementById('captionBar');
+            const captionFull = document.getElementById('captionFull');
+
+            // 移除即時字幕
+            const interimId = `interim-${currentUser.id}`;
+            const interimEl = captionBar.querySelector(`#${interimId}`);
+            if (interimEl) interimEl.remove();
+
+            const userName = currentUser?.user_metadata?.full_name || currentUser?.email?.split('@')[0] || '我';
+            const now = new Date().toLocaleTimeString('zh-TW');
+
+            // 字幕條：只保留最近 3 行
+            const captionItem = document.createElement('div');
+            captionItem.className = 'caption-item';
+            captionItem.style.opacity = '0.7';
+            captionItem.innerHTML = `
+                <span class="caption-speaker">${userName}:</span>
+                <span class="caption-text">${escapeHtml(text)}</span>
+            `;
+            captionBar.appendChild(captionItem);
+
+            // 只保留最近 3 行
+            const items = captionBar.querySelectorAll('.caption-item:not(.interim-caption)');
+            if (items.length > 3) {
+                for (let i = 0; i < items.length - 3; i++) {
+                    items[i].remove();
+                }
+            }
+
+            // 完整字幕：保留所有
+            const captionFullItem = document.createElement('div');
+            captionFullItem.className = 'caption-item-full';
+            captionFullItem.style.opacity = '0.7';
+            captionFullItem.innerHTML = `
+                <div class="caption-header">
+                    <span class="caption-speaker">${userName}</span>
+                    <span class="caption-time">${now}</span>
+                </div>
+                <div class="caption-text">${escapeHtml(text)}</div>
+            `;
+            captionFull.appendChild(captionFullItem);
+
+            captionBar.scrollTop = captionBar.scrollHeight;
+            captionFull.scrollTop = captionFull.scrollHeight;
+        }
+
+        // 儲存字幕到資料庫（背景執行，不阻塞）
+        async function saveCaption(text) {
+            try {
+                // 非同步儲存，不等待結果
+                supabaseClient
+                    .from('captions')
+                    .insert({
+                        meeting_id: MEETING_ID,
+                        user_id: currentUser.id,
+                        user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                        text: text,
+                        language: document.getElementById('languageSelect').value
+                    })
+                    .then(({ error }) => {
+                        if (error) console.error('儲存字幕失敗:', error);
+                        else console.log('✅ 字幕已儲存');
+                    });
+            } catch (error) {
+                console.error('儲存字幕失敗:', error);
+            }
+        }
+
+        // 顯示遠端字幕
+        function displayRemoteCaption(caption) {
+            const captionBar = document.getElementById('captionBar');
+            const captionFull = document.getElementById('captionFull');
+
+            // 移除對應使用者的即時字幕
+            const interimId = `interim-${caption.user_id}`;
+            const interimEl = captionBar.querySelector(`#${interimId}`);
+            if (interimEl) interimEl.remove();
+
+            const now = new Date(caption.created_at).toLocaleTimeString('zh-TW');
+
+            // 字幕條：只保留最近 3 行
+            const captionItem = document.createElement('div');
+            captionItem.className = 'caption-item';
+            captionItem.innerHTML = `
+                <span class="caption-speaker">${caption.user_name}:</span>
+                <span class="caption-text">${escapeHtml(caption.text)}</span>
+            `;
+            captionBar.appendChild(captionItem);
+
+            // 只保留最近 3 行
+            const items = captionBar.querySelectorAll('.caption-item:not(.interim-caption)');
+            if (items.length > 3) {
+                for (let i = 0; i < items.length - 3; i++) {
+                    items[i].remove();
+                }
+            }
+
+            // 完整字幕：保留所有
+            const captionFullItem = document.createElement('div');
+            captionFullItem.className = 'caption-item-full';
+            captionFullItem.innerHTML = `
+                <div class="caption-header">
+                    <span class="caption-speaker">${caption.user_name}</span>
+                    <span class="caption-time">${now}</span>
+                </div>
+                <div class="caption-text">${escapeHtml(caption.text)}</div>
+            `;
+            captionFull.appendChild(captionFullItem);
+
+            captionBar.scrollTop = captionBar.scrollHeight;
+            captionFull.scrollTop = captionFull.scrollHeight;
+        }
+
+        // HTML 轉義
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // 停止錄音
+        function stopRecording() {
+            if (recognition) {
+                try {
+                    recognition.stop();
+                } catch (e) {
+                    console.error('停止語音識別失敗:', e);
+                }
+            }
+            if (animationId) cancelAnimationFrame(animationId);
+            if (audioContext) {
+                try {
+                    audioContext.close();
+                } catch (e) {
+                    console.error('關閉音訊上下文失敗:', e);
+                }
+            }
+            isRecording = false;
+            isSpeaking = false;
+            updateSpeakingStatus(false);
+            document.getElementById('startBtn').textContent = '開始錄音';
+            document.getElementById('startBtn').classList.remove('btn-danger');
+            document.getElementById('startBtn').classList.add('btn-primary');
+        }
+
+        // 離開會議
+        async function leaveMeeting() {
+            try {
+                await supabaseClient
+                    .from('participants')
+                    .delete()
+                    .eq('meeting_id', MEETING_ID)
+                    .eq('user_id', currentUser.id);
+
+                if (participantsChannel) participantsChannel.unsubscribe();
+                if (captionsChannel) captionsChannel.unsubscribe();
+
+                console.log('✅ 已離開會議');
+            } catch (error) {
+                console.error('離開會議失敗:', error);
+            }
+        }
+
+        // 綁定按鈕事件
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            if (!isRecording) {
+                const speakerOK = await initSpeakerDetection();
+                if (speakerOK && recognition) {
+                    recognition.start();
+                    isRecording = true;
+                    document.getElementById('startBtn').textContent = '停止錄音';
+                    document.getElementById('startBtn').classList.remove('btn-primary');
+                    document.getElementById('startBtn').classList.add('btn-danger');
+                    console.log('🎤 開始錄音');
+                }
+            } else {
+                stopRecording();
+                console.log('⏸️ 停止錄音');
+            }
+        });
+
+        document.getElementById('leaveBtn').addEventListener('click', async () => {
+            if (confirm('確定要離開會議嗎？')) {
+                stopRecording();
+                await leaveMeeting();
+                await supabaseClient.auth.signOut();
+                window.location.href = 'index.html';
+            }
+        });
+
+        document.getElementById('languageSelect').addEventListener('change', (e) => {
+            if (recognition) {
+                const wasRecording = isRecording;
+                if (wasRecording) recognition.stop();
+                recognition.lang = e.target.value;
+                if (wasRecording) setTimeout(() => recognition.start(), 100);
+            }
+        });
+
+        document.getElementById('toggleCaptions').addEventListener('click', () => {
+            const container = document.getElementById('captionContainer');
+            const btn = document.getElementById('toggleCaptions');
+            container.classList.toggle('expanded');
+            btn.textContent = container.classList.contains('expanded') ? '收合 ▼' : '展開 ▲';
+        });
+
+        // 頁面關閉時離開會議
+        window.addEventListener('beforeunload', () => {
+            leaveMeeting();
+        });
+
+        console.log('=== 會議室初始化完成 ===');
+    </script>
+</body>
+
+</html>
