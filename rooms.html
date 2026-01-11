@@ -140,8 +140,11 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script src="js/config.js"></script>
     <script>
+        // Supabase 配置
+        const SUPABASE_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluenFzZGVscnd4eGxiY3VtYWl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTQzMjksImV4cCI6MjA4MzI5MDMyOX0.XBrMbxu_vcNQb55v6OZNoB-Mm1w-A2OtJk1AAgofjg0';
+
         const { createClient } = supabase;
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
