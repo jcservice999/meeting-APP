@@ -111,6 +111,18 @@
             }
         }
 
+        // 立即檢查登入狀態（在頁面載入時）
+        (async function checkAuthImmediately() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) {
+                console.log('❌ 未登入，跳轉到首頁');
+                alert('請先登入');
+                window.location.href = 'index.html';
+                return;
+            }
+            console.log('✅ 已登入，繼續載入會議室');
+        })();
+
         // 檢查登入狀態並加入會議
         supabaseClient.auth.getSession().then(async ({ data: { session } }) => {
             if (!session) {
