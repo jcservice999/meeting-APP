@@ -93,13 +93,32 @@
         }
 
         .email-tag {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
             background: var(--primary-color);
             color: white;
             padding: 0.25rem 0.75rem;
             border-radius: 4px;
             margin: 0.25rem;
             font-size: 0.9rem;
+        }
+
+        .email-tag button {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 1.2rem;
+            padding: 0;
+            margin: 0;
+            line-height: 1;
+            opacity: 0.7;
+            transition: opacity 0.2s;
+        }
+
+        .email-tag button:hover {
+            opacity: 1;
         }
     </style>
 </head>
@@ -205,7 +224,7 @@
 
                 if (accessError) throw accessError;
 
-                const emailsHtml = access.map(a => `<span class="email-tag">${a.email}</span>`).join('');
+                const emailsHtml = access.map(a => `<span class="email-tag">${a.email}<button onclick="removeEmail('${a.email}')">×</button></span>`).join('');
                 document.getElementById('currentEmails').innerHTML = emailsHtml || '無';
 
             } catch (error) {
@@ -263,6 +282,28 @@
                 } else {
                     alert('新增失敗：' + error.message);
                 }
+            }
+        }
+
+        // 刪除 Email
+        async function removeEmail(email) {
+            if (!confirm(`確定要移除 ${email} 嗎？`)) return;
+
+            try {
+                const { error } = await supabaseClient
+                    .from('room_access')
+                    .delete()
+                    .eq('room_id', roomId)
+                    .eq('email', email);
+
+                if (error) throw error;
+
+                alert('Email 已移除！');
+                loadRoom(); // 重新載入
+
+            } catch (error) {
+                console.error('移除 Email 失敗:', error);
+                alert('移除失敗：' + error.message);
             }
         }
 
