@@ -85,7 +85,7 @@
 
 <body>
     <div class="login-container">
-        <div class="login-card">
+        <div class="login-card" id="loginCard">
             <h1>🎤 會議軟體</h1>
             <p>即時語音轉文字 · 多人協作會議</p>
 
@@ -122,32 +122,81 @@
                 </div>
             </div>
         </div>
+
+        <!-- 登入後顯示 -->
+        <div class="login-card" id="loggedInCard" style="display: none;">
+            <h1>🎤 會議軟體</h1>
+            <p id="userEmail">歡迎回來！</p>
+
+            <div style="display: flex; flex-direction: column; gap: 1rem; margin-top: 2rem;">
+                <button class="login-btn" onclick="window.location.href='create-room.html'">
+                    <span>🏠</span>
+                    創建新會議室
+                </button>
+                <button class="login-btn" onclick="window.location.href='rooms.html'">
+                    <span>📋</span>
+                    我的會議室
+                </button>
+                <button class="login-btn" onclick="window.location.href='meeting.html'">
+                    <span>🎤</span>
+                    快速進入 (公開房間)
+                </button>
+                <button class="login-btn" onclick="logout()" style="background: #ef4444;">
+                    <span>🚪</span>
+                    登出
+                </button>
+            </div>
+        </div>
     </div>
 
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <script src="js/config.js"></script>
     <script>
-        // 等待 Supabase SDK 載入完成
-        window.addEventListener('load', function () {
-            // 載入配置和管理器
-            const script1 = document.createElement('script');
-            script1.src = 'js/supabase-config.js';
-            document.body.appendChild(script1);
+        const { createClient } = supabase;
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-            script1.onload = function () {
-                const script2 = document.createElement('script');
-                script2.src = 'js/user-manager.js';
-                document.body.appendChild(script2);
+        // 檢查登入狀態
+        async function checkLoginStatus() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
 
-                script2.onload = function () {
-                    // 綁定登入按鈕
-                    document.getElementById('loginBtn').addEventListener('click', async () => {
-                        await userManager.loginWithGoogle();
-                    });
+            if (session) {
+                // 已登入，顯示登入後的介面
+                document.getElementById('loginCard').style.display = 'none';
+                document.getElementById('loggedInCard').style.display = 'block';
+                document.getElementById('userEmail').textContent = `歡迎，${session.user.email}`;
+            } else {
+                // 未登入，顯示登入按鈕
+                document.getElementById('loginCard').style.display = 'block';
+                document.getElementById('loggedInCard').style.display = 'none';
+            }
+        }
 
-                    // 檢查登入狀態
-                    userManager.init();
-                };
-            };
-        });
+        // 登入
+        async function loginWithGoogle() {
+            const { error } = await supabaseClient.auth.signInWithOAuth({
+                provider: 'google',
+                options: {
+                    redirectTo: window.location.origin + '/meeting-app/index.html'
+                }
+            });
+
+            if (error) {
+                console.error('登入失敗:', error);
+                alert('登入失敗：' + error.message);
+            }
+        }
+
+        // 登出
+        async function logout() {
+            await supabaseClient.auth.signOut();
+            window.location.reload();
+        }
+
+        // 綁定登入按鈕
+        document.getElementById('loginBtn').addEventListener('click', loginWithGoogle);
+
+        // 初始化
+        checkLoginStatus();
     </script>
 </body>
 
