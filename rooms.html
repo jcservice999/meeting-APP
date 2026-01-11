@@ -261,6 +261,11 @@
             window.location.href = `meeting.html?room=${roomId}`;
         }
 
+        // 編輯房間
+        function editRoom(roomId) {
+            window.location.href = `edit-room.html?room=${roomId}`;
+        }
+
         // 刪除房間
         async function deleteRoom(roomId) {
             if (!confirm('確定要刪除此房間嗎？')) return;
