@@ -255,17 +255,51 @@
                 const endDate = new Date(date);
                 endDate.setHours(23, 59, 59, 999);
 
-                const { error } = await supabaseClient
+                // 先查詢要刪除的記錄 ID
+                const { data: toDelete, error: selectError } = await supabaseClient
                     .from('captions')
-                    .delete()
+                    .select('id')
                     .eq('meeting_id', meetingId)
                     .gte('created_at', startDate.toISOString())
                     .lte('created_at', endDate.toISOString());
 
-                if (error) throw error;
+                if (selectError) throw selectError;
+
+                if (!toDelete || toDelete.length === 0) {
+                    alert('找不到要刪除的記錄');
+                    return;
+                }
+
+                console.log('準備刪除', toDelete.length, '筆記錄');
+
+                // 逐一刪除（避免 RLS 問題）
+                const ids = toDelete.map(item => item.id);
+                const { error: deleteError, count } = await supabaseClient
+                    .from('captions')
+                    .delete()
+                    .in('id', ids);
+
+                if (deleteError) {
+                    console.error('刪除錯誤:', deleteError);
+                    throw deleteError;
+                }
+
+                // 驗證是否真的刪除了
+                const { data: remaining } = await supabaseClient
+                    .from('captions')
+                    .select('id')
+                    .eq('meeting_id', meetingId)
+                    .gte('created_at', startDate.toISOString())
+                    .lte('created_at', endDate.toISOString());
+
+                if (remaining && remaining.length > 0) {
+                    alert(`刪除失敗：可能是 Supabase RLS 權限問題。請到 Supabase Dashboard 檢查 captions 表格的 RLS 設定。`);
+                    console.error('RLS 可能阻止了刪除操作');
+                    return;
+                }
 
                 alert('刪除成功！');
-                loadMeetings(); // 重新載入列表
+                loadMeetings();
 
             } catch (error) {
                 console.error('刪除失敗:', error);
