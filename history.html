@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>會議紀錄</title>
+    <link rel="stylesheet" href="styles/common.css">
+    <style>
+        .history-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        h1 {
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        .back-btn {
+            padding: 0.5rem 1rem;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .back-btn:hover {
+            background: var(--border-color);
+        }
+
+        .meeting-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .meeting-card {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: var(--shadow-md);
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .meeting-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-lg);
+        }
+
+        .meeting-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+
+        .meeting-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .meeting-date {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .meeting-preview {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+            max-height: 60px;
+            overflow: hidden;
+        }
+
+        .meeting-stats {
+            display: flex;
+            gap: 1rem;
+            margin-top: 0.75rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="history-container">
+        <div class="header">
+            <h1>📜 會議紀錄</h1>
+            <a href="index.html" class="back-btn">← 返回首頁</a>
+        </div>
+
+        <div id="meetingList" class="meeting-list">
+            載入中...
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const SUPABASE_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluenFzZGVscnd4eGxiY3VtYWl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTQzMjksImV4cCI6MjA4MzI5MDMyOX0.XBrMbxu_vcNQb55v6OZNoB-Mm1w-A2OtJk1AAgofjg0';
+
+        const { createClient } = supabase;
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        async function loadMeetings() {
+            const container = document.getElementById('meetingList');
+
+            try {
+                // 獲取所有會議紀錄，按房間分組
+                const { data, error } = await supabaseClient
+                    .from('captions')
+                    .select('*')
+                    .order('created_at', { ascending: false });
+
+                if (error) throw error;
+
+                if (!data || data.length === 0) {
+                    container.innerHTML = '<div class="empty-state">尚無會議紀錄</div>';
+                    return;
+                }
+
+                // 按房間和日期分組
+                const meetings = {};
+                data.forEach(caption => {
+                    const roomId = caption.room_id || 'public';
+                    const date = new Date(caption.created_at).toLocaleDateString('zh-TW');
+                    const key = `${roomId}_${date}`;
+
+                    if (!meetings[key]) {
+                        meetings[key] = {
+                            roomId,
+                            date,
+                            captions: [],
+                            firstTime: caption.created_at,
+                            lastTime: caption.created_at
+                        };
+                    }
+                    meetings[key].captions.push(caption);
+                    meetings[key].lastTime = caption.created_at;
+                });
+
+                // 排序：最新的會議在最上面
+                const sortedMeetings = Object.values(meetings).sort((a, b) =>
+                    new Date(b.firstTime) - new Date(a.firstTime)
+                );
+
+                container.innerHTML = sortedMeetings.map(meeting => {
+                    const preview = meeting.captions.slice(0, 2).map(c =>
+                        `${c.user_name || '未知'}: ${(c.text || '').substring(0, 30)}...`
+                    ).join(' ');
+
+                    const startTime = new Date(meeting.lastTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                    const endTime = new Date(meeting.firstTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+
+                    return `
+                        <div class="meeting-card" onclick="viewMeeting('${meeting.roomId}', '${meeting.date}')">
+                            <div class="meeting-header">
+                                <div class="meeting-name">🎤 ${meeting.roomId === 'public' ? '公開會議' : `房間: ${meeting.roomId}`}</div>
+                                <div class="meeting-date">${meeting.date}</div>
+                            </div>
+                            <div class="meeting-preview">${preview}</div>
+                            <div class="meeting-stats">
+                                <span>📝 ${meeting.captions.length} 則對話</span>
+                                <span>⏰ ${startTime} - ${endTime}</span>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                console.error('載入失敗:', error);
+                container.innerHTML = `<div class="empty-state">載入失敗：${error.message}</div>`;
+            }
+        }
+
+        function viewMeeting(roomId, date) {
+            window.location.href = `conversation.html?room=${encodeURIComponent(roomId)}&date=${encodeURIComponent(date)}`;
+        }
+
+        loadMeetings();
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>對話紀錄</title>
+    <link rel="stylesheet" href="styles/common.css">
+    <style>
+        .conversation-container {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 1rem;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .header-left h1 {
+            color: var(--text-primary);
+            margin: 0 0 0.25rem 0;
+            font-size: 1.5rem;
+        }
+
+        .header-left .meeting-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-secondary:hover {
+            background: var(--border-color);
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--primary-dark);
+        }
+
+        .conversation-list {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .message:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.25rem;
+        }
+
+        .message-user {
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .message-time {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .message-text {
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        .summary-section {
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .summary-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .summary-content {
+            color: var(--text-primary);
+            line-height: 1.8;
+            white-space: pre-wrap;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-muted);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="conversation-container">
+        <div class="header">
+            <div class="header-left">
+                <h1 id="pageTitle">📝 對話紀錄</h1>
+                <div class="meeting-info" id="meetingInfo">載入中...</div>
+            </div>
+            <div class="header-actions">
+                <a href="history.html" class="btn btn-secondary">← 返回列表</a>
+                <button class="btn btn-primary" onclick="generateSummary()">✨ AI 整理重點</button>
+            </div>
+        </div>
+
+        <div id="conversationList" class="conversation-list">
+            <div class="loading">載入中...</div>
+        </div>
+
+        <div id="summarySection" class="summary-section" style="display: none;">
+            <div class="summary-header">
+                <span class="summary-title">📋 會議重點整理</span>
+            </div>
+            <div id="summaryContent" class="summary-content"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        const SUPABASE_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluenFzZGVscnd4eGxiY3VtYWl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTQzMjksImV4cCI6MjA4MzI5MDMyOX0.XBrMbxu_vcNQb55v6OZNoB-Mm1w-A2OtJk1AAgofjg0';
+        const EDGE_FUNCTION_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/rapid-action';
+
+        const { createClient } = supabase;
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let allCaptions = [];
+
+        async function loadConversation() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const roomId = urlParams.get('room');
+            const date = urlParams.get('date');
+
+            if (!roomId || !date) {
+                alert('缺少會議資訊');
+                window.location.href = 'history.html';
+                return;
+            }
+
+            const container = document.getElementById('conversationList');
+            const titleEl = document.getElementById('pageTitle');
+            const infoEl = document.getElementById('meetingInfo');
+
+            titleEl.textContent = `📝 ${roomId === 'public' ? '公開會議' : `房間: ${roomId}`}`;
+            infoEl.textContent = `日期：${date}`;
+
+            try {
+                // 計算日期範圍
+                const startDate = new Date(date);
+                startDate.setHours(0, 0, 0, 0);
+                const endDate = new Date(date);
+                endDate.setHours(23, 59, 59, 999);
+
+                let query = supabaseClient
+                    .from('captions')
+                    .select('*')
+                    .gte('created_at', startDate.toISOString())
+                    .lte('created_at', endDate.toISOString())
+                    .order('created_at', { ascending: true });
+
+                if (roomId !== 'public') {
+                    query = query.eq('room_id', roomId);
+                } else {
+                    query = query.is('room_id', null);
+                }
+
+                const { data, error } = await query;
+
+                if (error) throw error;
+
+                allCaptions = data || [];
+
+                if (allCaptions.length === 0) {
+                    container.innerHTML = '<div class="loading">此會議沒有對話紀錄</div>';
+                    return;
+                }
+
+                container.innerHTML = allCaptions.map(caption => {
+                    const time = new Date(caption.created_at).toLocaleTimeString('zh-TW', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+
+                    return `
+                        <div class="message">
+                            <div class="message-header">
+                                <span class="message-user">${caption.user_name || '未知'}</span>
+                                <span class="message-time">${time}</span>
+                            </div>
+                            <div class="message-text">${caption.text || ''}</div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (error) {
+                console.error('載入失敗:', error);
+                container.innerHTML = `<div class="loading">載入失敗：${error.message}</div>`;
+            }
+        }
+
+        async function generateSummary() {
+            const summarySection = document.getElementById('summarySection');
+            const summaryContent = document.getElementById('summaryContent');
+
+            summarySection.style.display = 'block';
+            summaryContent.innerHTML = '⏳ AI 正在整理中...';
+
+            if (allCaptions.length === 0) {
+                summaryContent.innerHTML = '沒有對話可以整理';
+                return;
+            }
+
+            try {
+                const conversationText = allCaptions.map(c =>
+                    `${c.user_name || '未知'}: ${c.text || ''}`
+                ).join('\n');
+
+                const response = await fetch(EDGE_FUNCTION_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    },
+                    body: JSON.stringify({ conversationText })
+                });
+
+                const result = await response.json();
+
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+
+                summaryContent.innerHTML = result.summary;
+
+            } catch (error) {
+                console.error('AI 整理失敗:', error);
+                summaryContent.innerHTML = `整理失敗：${error.message}`;
+            }
+        }
+
+        loadConversation();
+    </script>
+</body>
+
+</html>

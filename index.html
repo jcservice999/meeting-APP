@@ -134,7 +134,7 @@
                     <span>📋</span>
                     我的會議室
                 </button>
-                <button class="login-btn" onclick="toggleHistory()" style="background: #2563eb;">
+                <button class="login-btn" onclick="window.location.href='history.html'" style="background: #2563eb;">
                     <span>📜</span>
                     歷史對話紀錄
                 </button>
@@ -142,23 +142,6 @@
                     <span>🚪</span>
                     登出
                 </button>
-            </div>
-
-            <!-- 歷史對話紀錄區域 -->
-            <div id="historySection" style="display: none; margin-top: 2rem;">
-                <h3 style="color: var(--text-primary); margin-bottom: 1rem;">📜 歷史對話紀錄</h3>
-                <div id="historyList"
-                    style="max-height: 300px; overflow-y: auto; background: var(--bg-tertiary); padding: 1rem; border-radius: 8px;">
-                    載入中...
-                </div>
-                <button class="login-btn" onclick="summarizeConversations()"
-                    style="background: #10b981; margin-top: 1rem;">
-                    <span>✨</span>
-                    AI 整理對話重點
-                </button>
-                <div id="summaryResult"
-                    style="display: none; margin-top: 1rem; background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; color: var(--text-primary);">
-                </div>
             </div>
         </div>
     </div>
@@ -225,134 +208,6 @@
         // 初始化
         console.log('開始檢查登入狀態');
         checkLoginStatus();
-
-        // Gemini API 透過 Supabase Edge Function 呼叫（API Key 安全存放在後端）
-        const EDGE_FUNCTION_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/rapid-action';
-
-        // 切換歷史對話顯示
-        function toggleHistory() {
-            const historySection = document.getElementById('historySection');
-            if (historySection.style.display === 'none') {
-                historySection.style.display = 'block';
-                loadHistory();
-            } else {
-                historySection.style.display = 'none';
-            }
-        }
-
-        // 載入歷史對話
-        async function loadHistory() {
-            const historyList = document.getElementById('historyList');
-
-            try {
-                // 從 captions 表格載入對話紀錄
-                const { data, error } = await supabaseClient
-                    .from('captions')
-                    .select('*')
-                    .order('created_at', { ascending: false })
-                    .limit(50);
-
-                if (error) throw error;
-
-                if (!data || data.length === 0) {
-                    historyList.innerHTML = '<p style="color: var(--text-muted);">尚無對話紀錄</p>';
-                    return;
-                }
-
-                // 按房間分組
-                const grouped = {};
-                data.forEach(caption => {
-                    const roomId = caption.room_id || 'public';
-                    if (!grouped[roomId]) {
-                        grouped[roomId] = [];
-                    }
-                    grouped[roomId].push(caption);
-                });
-
-                let html = '';
-                for (const [roomId, captions] of Object.entries(grouped)) {
-                    html += `<div style="margin-bottom: 1rem;">
-                        <strong style="color: var(--primary-color);">房間: ${roomId}</strong>
-                        <div style="margin-top: 0.5rem;">`;
-
-                    captions.slice(0, 5).forEach(cap => {
-                        const time = new Date(cap.created_at).toLocaleString('zh-TW');
-                        html += `<p style="margin: 0.25rem 0; font-size: 0.9rem; color: var(--text-secondary);">
-                            <span style="color: var(--text-muted);">[${time}]</span> 
-                            <strong>${cap.user_name || '未知'}:</strong> ${cap.text || ''}
-                        </p>`;
-                    });
-
-                    html += `</div></div>`;
-                }
-
-                historyList.innerHTML = html;
-
-            } catch (error) {
-                console.error('載入歷史對話失敗:', error);
-                historyList.innerHTML = '<p style="color: #ef4444;">載入失敗：' + error.message + '</p>';
-            }
-        }
-
-        // AI 整理對話重點
-        async function summarizeConversations() {
-            const summaryResult = document.getElementById('summaryResult');
-            summaryResult.style.display = 'block';
-            summaryResult.innerHTML = '<p>⏳ AI 正在整理中...</p>';
-
-            try {
-                // 載入最近的對話
-                const { data, error } = await supabaseClient
-                    .from('captions')
-                    .select('*')
-                    .order('created_at', { ascending: false })
-                    .limit(100);
-
-                if (error) throw error;
-
-                if (!data || data.length === 0) {
-                    summaryResult.innerHTML = '<p style="color: var(--text-muted);">沒有對話可以整理</p>';
-                    return;
-                }
-
-                // 準備對話文本
-                const conversationText = data.map(cap =>
-                    `${cap.user_name || '未知'}: ${cap.text || ''}`
-                ).join('\n');
-
-                // 呼叫 Supabase Edge Function（API Key 安全存放在後端）
-                const response = await fetch(EDGE_FUNCTION_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    },
-                    body: JSON.stringify({ conversationText })
-                });
-
-                if (!response.ok) {
-                    throw new Error('API 請求失敗');
-                }
-
-                const result = await response.json();
-
-                if (result.error) {
-                    throw new Error(result.error);
-                }
-
-                const summary = result.summary;
-
-                summaryResult.innerHTML = `
-                    <h4 style="color: var(--primary-color); margin-bottom: 0.5rem;">📝 對話重點整理</h4>
-                    <div style="white-space: pre-wrap;">${summary}</div>
-                `;
-
-            } catch (error) {
-                console.error('AI 整理失敗:', error);
-                summaryResult.innerHTML = `<p style="color: #ef4444;">整理失敗：${error.message}</p>
-                    <p style="font-size: 0.85rem; color: var(--text-muted);">請確認您已設定 Gemini API Key</p>`;
-            }
-        }
     </script>
 </body>
 
