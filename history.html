@@ -53,13 +53,17 @@
             border-radius: 12px;
             padding: 1.5rem;
             box-shadow: var(--shadow-md);
-            cursor: pointer;
             transition: transform 0.2s, box-shadow 0.2s;
+            position: relative;
         }
 
         .meeting-card:hover {
             transform: translateY(-2px);
             box-shadow: var(--shadow-lg);
+        }
+
+        .meeting-content {
+            cursor: pointer;
         }
 
         .meeting-header {
@@ -96,6 +100,35 @@
             color: var(--text-muted);
         }
 
+        .meeting-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            padding-top: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .btn-view {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+        }
+
         .empty-state {
             text-align: center;
             padding: 3rem;
@@ -128,7 +161,7 @@
             const container = document.getElementById('meetingList');
 
             try {
-                // 獲取所有會議紀錄，按房間分組
+                // 獲取所有會議紀錄
                 const { data, error } = await supabaseClient
                     .from('captions')
                     .select('*')
@@ -141,16 +174,16 @@
                     return;
                 }
 
-                // 按房間和日期分組
+                // 按 meeting_id 和日期分組
                 const meetings = {};
                 data.forEach(caption => {
-                    const roomId = caption.room_id || 'public';
+                    const meetingId = caption.meeting_id || 'default';
                     const date = new Date(caption.created_at).toLocaleDateString('zh-TW');
-                    const key = `${roomId}_${date}`;
+                    const key = `${meetingId}_${date}`;
 
                     if (!meetings[key]) {
                         meetings[key] = {
-                            roomId,
+                            meetingId,
                             date,
                             captions: [],
                             firstTime: caption.created_at,
@@ -158,12 +191,17 @@
                         };
                     }
                     meetings[key].captions.push(caption);
-                    meetings[key].lastTime = caption.created_at;
+                    if (new Date(caption.created_at) < new Date(meetings[key].firstTime)) {
+                        meetings[key].firstTime = caption.created_at;
+                    }
+                    if (new Date(caption.created_at) > new Date(meetings[key].lastTime)) {
+                        meetings[key].lastTime = caption.created_at;
+                    }
                 });
 
                 // 排序：最新的會議在最上面
                 const sortedMeetings = Object.values(meetings).sort((a, b) =>
-                    new Date(b.firstTime) - new Date(a.firstTime)
+                    new Date(b.lastTime) - new Date(a.lastTime)
                 );
 
                 container.innerHTML = sortedMeetings.map(meeting => {
@@ -171,19 +209,25 @@
                         `${c.user_name || '未知'}: ${(c.text || '').substring(0, 30)}...`
                     ).join(' ');
 
-                    const startTime = new Date(meeting.lastTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
-                    const endTime = new Date(meeting.firstTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                    const startTime = new Date(meeting.firstTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
+                    const endTime = new Date(meeting.lastTime).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' });
 
                     return `
-                        <div class="meeting-card" onclick="viewMeeting('${meeting.roomId}', '${meeting.date}')">
-                            <div class="meeting-header">
-                                <div class="meeting-name">🎤 ${meeting.roomId === 'public' ? '公開會議' : `房間: ${meeting.roomId}`}</div>
-                                <div class="meeting-date">${meeting.date}</div>
+                        <div class="meeting-card">
+                            <div class="meeting-content" onclick="viewMeeting('${meeting.meetingId}', '${meeting.date}')">
+                                <div class="meeting-header">
+                                    <div class="meeting-name">🎤 會議 ${meeting.meetingId.substring(0, 8)}...</div>
+                                    <div class="meeting-date">${meeting.date}</div>
+                                </div>
+                                <div class="meeting-preview">${preview}</div>
+                                <div class="meeting-stats">
+                                    <span>📝 ${meeting.captions.length} 則對話</span>
+                                    <span>⏰ ${startTime} - ${endTime}</span>
+                                </div>
                             </div>
-                            <div class="meeting-preview">${preview}</div>
-                            <div class="meeting-stats">
-                                <span>📝 ${meeting.captions.length} 則對話</span>
-                                <span>⏰ ${startTime} - ${endTime}</span>
+                            <div class="meeting-actions">
+                                <button class="btn btn-view" onclick="viewMeeting('${meeting.meetingId}', '${meeting.date}')">👁️ 查看對話</button>
+                                <button class="btn btn-delete" onclick="deleteMeeting('${meeting.meetingId}', '${meeting.date}')">🗑️ 刪除紀錄</button>
                             </div>
                         </div>
                     `;
@@ -195,8 +239,38 @@
             }
         }
 
-        function viewMeeting(roomId, date) {
-            window.location.href = `conversation.html?room=${encodeURIComponent(roomId)}&date=${encodeURIComponent(date)}`;
+        function viewMeeting(meetingId, date) {
+            window.location.href = `conversation.html?meeting=${encodeURIComponent(meetingId)}&date=${encodeURIComponent(date)}`;
+        }
+
+        async function deleteMeeting(meetingId, date) {
+            if (!confirm('確定要刪除此會議的所有對話紀錄嗎？此操作無法復原。')) {
+                return;
+            }
+
+            try {
+                // 計算日期範圍
+                const startDate = new Date(date);
+                startDate.setHours(0, 0, 0, 0);
+                const endDate = new Date(date);
+                endDate.setHours(23, 59, 59, 999);
+
+                const { error } = await supabaseClient
+                    .from('captions')
+                    .delete()
+                    .eq('meeting_id', meetingId)
+                    .gte('created_at', startDate.toISOString())
+                    .lte('created_at', endDate.toISOString());
+
+                if (error) throw error;
+
+                alert('刪除成功！');
+                loadMeetings(); // 重新載入列表
+
+            } catch (error) {
+                console.error('刪除失敗:', error);
+                alert('刪除失敗：' + error.message);
+            }
         }
 
         loadMeetings();

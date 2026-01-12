@@ -36,6 +36,7 @@
         .header-actions {
             display: flex;
             gap: 0.5rem;
+            flex-wrap: wrap;
         }
 
         .btn {
@@ -66,6 +67,11 @@
 
         .btn-primary:hover {
             background: var(--primary-dark);
+        }
+
+        .btn-danger {
+            background: #ef4444;
+            color: white;
         }
 
         .conversation-list {
@@ -153,6 +159,7 @@
             <div class="header-actions">
                 <a href="history.html" class="btn btn-secondary">← 返回列表</a>
                 <button class="btn btn-primary" onclick="generateSummary()">✨ AI 整理重點</button>
+                <button class="btn btn-danger" onclick="deleteThisMeeting()">🗑️ 刪除紀錄</button>
             </div>
         </div>
 
@@ -178,13 +185,15 @@
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         let allCaptions = [];
+        let currentMeetingId = '';
+        let currentDate = '';
 
         async function loadConversation() {
             const urlParams = new URLSearchParams(window.location.search);
-            const roomId = urlParams.get('room');
-            const date = urlParams.get('date');
+            currentMeetingId = urlParams.get('meeting');
+            currentDate = urlParams.get('date');
 
-            if (!roomId || !date) {
+            if (!currentMeetingId || !currentDate) {
                 alert('缺少會議資訊');
                 window.location.href = 'history.html';
                 return;
@@ -194,30 +203,23 @@
             const titleEl = document.getElementById('pageTitle');
             const infoEl = document.getElementById('meetingInfo');
 
-            titleEl.textContent = `📝 ${roomId === 'public' ? '公開會議' : `房間: ${roomId}`}`;
-            infoEl.textContent = `日期：${date}`;
+            titleEl.textContent = `📝 會議 ${currentMeetingId.substring(0, 8)}...`;
+            infoEl.textContent = `日期：${currentDate}`;
 
             try {
                 // 計算日期範圍
-                const startDate = new Date(date);
+                const startDate = new Date(currentDate);
                 startDate.setHours(0, 0, 0, 0);
-                const endDate = new Date(date);
+                const endDate = new Date(currentDate);
                 endDate.setHours(23, 59, 59, 999);
 
-                let query = supabaseClient
+                const { data, error } = await supabaseClient
                     .from('captions')
                     .select('*')
+                    .eq('meeting_id', currentMeetingId)
                     .gte('created_at', startDate.toISOString())
                     .lte('created_at', endDate.toISOString())
                     .order('created_at', { ascending: true });
-
-                if (roomId !== 'public') {
-                    query = query.eq('room_id', roomId);
-                } else {
-                    query = query.is('room_id', null);
-                }
-
-                const { data, error } = await query;
 
                 if (error) throw error;
 
@@ -289,6 +291,36 @@
             } catch (error) {
                 console.error('AI 整理失敗:', error);
                 summaryContent.innerHTML = `整理失敗：${error.message}`;
+            }
+        }
+
+        async function deleteThisMeeting() {
+            if (!confirm('確定要刪除此會議的所有對話紀錄嗎？此操作無法復原。')) {
+                return;
+            }
+
+            try {
+                // 計算日期範圍
+                const startDate = new Date(currentDate);
+                startDate.setHours(0, 0, 0, 0);
+                const endDate = new Date(currentDate);
+                endDate.setHours(23, 59, 59, 999);
+
+                const { error } = await supabaseClient
+                    .from('captions')
+                    .delete()
+                    .eq('meeting_id', currentMeetingId)
+                    .gte('created_at', startDate.toISOString())
+                    .lte('created_at', endDate.toISOString());
+
+                if (error) throw error;
+
+                alert('刪除成功！');
+                window.location.href = 'history.html';
+
+            } catch (error) {
+                console.error('刪除失敗:', error);
+                alert('刪除失敗：' + error.message);
             }
         }
 
