@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>語音 API 設定 - 會議軟體</title>
+    <link rel="stylesheet" href="styles/common.css">
+    <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+    <style>
+        .settings-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem 1rem;
+        }
+
+        .page-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+
+        .page-title {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .account-list {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .account-card {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .account-card.active {
+            border-color: var(--primary-color);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .account-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .account-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+        }
+
+        .account-badge {
+            background: var(--primary-color);
+            color: white;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+        }
+
+        .account-info {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-bottom: 1rem;
+        }
+
+        .account-actions {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .btn-sm {
+            padding: 0.4rem 0.8rem;
+            font-size: 0.85rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-muted);
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+
+        /* 新增帳號 Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            padding: 1rem;
+        }
+
+        .modal-overlay.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 16px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 500px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: var(--text-muted);
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            font-size: 1rem;
+        }
+
+        .form-textarea {
+            min-height: 200px;
+            font-family: monospace;
+            font-size: 0.85rem;
+        }
+
+        .form-help {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .alert {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #f59e0b;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="settings-container">
+        <header class="page-header">
+            <h1 class="page-title">🎤 語音 API 設定</h1>
+            <button class="btn btn-secondary" onclick="window.location.href='index.html'">返回首頁</button>
+        </header>
+
+        <div class="alert alert-warning">
+            ⚠️ 您的 API 憑證會安全地儲存在資料庫中，不會出現在前端程式碼。
+        </div>
+
+        <div style="margin-bottom: 1.5rem;">
+            <button class="btn btn-primary" onclick="showAddModal()">+ 新增 API 帳號</button>
+        </div>
+
+        <div id="accountList" class="account-list">
+            <div class="empty-state">
+                <div class="empty-state-icon">🔑</div>
+                <p>尚未新增任何 API 帳號</p>
+                <p>點擊上方按鈕新增您的 Google Cloud 憑證</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 新增帳號 Modal -->
+    <div id="addModal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">新增 API 帳號</h2>
+                <button class="modal-close" onclick="hideAddModal()">&times;</button>
+            </div>
+            <form id="addAccountForm" onsubmit="handleAddAccount(event)">
+                <div class="form-group">
+                    <label class="form-label">帳號名稱</label>
+                    <input type="text" class="form-input" id="accountName" placeholder="例如：公司帳號、個人帳號" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">JSON 憑證</label>
+                    <textarea class="form-input form-textarea" id="accountCredentials"
+                        placeholder='貼上您的 Google Cloud 服務帳戶 JSON 內容...' required></textarea>
+                    <p class="form-help">請打開下載的 JSON 檔案，複製全部內容貼到這裡</p>
+                </div>
+                <div style="display: flex; gap: 1rem;">
+                    <button type="button" class="btn btn-secondary" onclick="hideAddModal()">取消</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">新增帳號</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        const SUPABASE_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co';
+        const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluenFzZGVscnd4eGxiY3VtYWl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTQzMjksImV4cCI6MjA4MzI5MDMyOX0.XBrMbxu_vcNQb55v6OZNoB-Mm1w-A2OtJk1AAgofjg0';
+
+        const { createClient } = supabase;
+        const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        let currentUser = null;
+
+        // 檢查登入狀態
+        async function checkAuth() {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) {
+                window.location.href = 'index.html';
+                return;
+            }
+            currentUser = session.user;
+            loadAccounts();
+        }
+
+        // 載入帳號列表
+        async function loadAccounts() {
+            const { data, error } = await supabaseClient
+                .from('speech_api_accounts')
+                .select('id, name, provider, is_active, created_at')
+                .eq('user_id', currentUser.id)
+                .order('created_at', { ascending: false });
+
+            if (error) {
+                console.error('載入失敗:', error);
+                return;
+            }
+
+            renderAccounts(data || []);
+        }
+
+        // 渲染帳號列表
+        function renderAccounts(accounts) {
+            const container = document.getElementById('accountList');
+
+            if (accounts.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔑</div>
+                        <p>尚未新增任何 API 帳號</p>
+                        <p>點擊上方按鈕新增您的 Google Cloud 憑證</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = accounts.map(account => `
+                <div class="account-card ${account.is_active ? 'active' : ''}">
+                    <div class="account-header">
+                        <span class="account-name">${account.name}</span>
+                        ${account.is_active ? '<span class="account-badge">使用中</span>' : ''}
+                    </div>
+                    <div class="account-info">
+                        <span>供應商：${account.provider === 'google' ? 'Google Cloud' : account.provider}</span>
+                        <span> · </span>
+                        <span>新增於 ${new Date(account.created_at).toLocaleDateString('zh-TW')}</span>
+                    </div>
+                    <div class="account-actions">
+                        ${!account.is_active ? `
+                            <button class="btn btn-primary btn-sm" onclick="setActive('${account.id}')">設為使用中</button>
+                        ` : ''}
+                        <button class="btn btn-danger btn-sm" onclick="deleteAccount('${account.id}', '${account.name}')">刪除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 顯示新增 Modal
+        function showAddModal() {
+            document.getElementById('addModal').classList.add('show');
+        }
+
+        // 隱藏新增 Modal
+        function hideAddModal() {
+            document.getElementById('addModal').classList.remove('show');
+            document.getElementById('addAccountForm').reset();
+        }
+
+        // 新增帳號
+        async function handleAddAccount(event) {
+            event.preventDefault();
+
+            const name = document.getElementById('accountName').value.trim();
+            const credentials = document.getElementById('accountCredentials').value.trim();
+
+            // 驗證 JSON 格式
+            try {
+                const parsed = JSON.parse(credentials);
+                if (!parsed.type || !parsed.project_id || !parsed.private_key) {
+                    throw new Error('缺少必要欄位');
+                }
+            } catch (e) {
+                alert('JSON 格式無效，請確認您貼上的是完整的服務帳戶 JSON 內容');
+                return;
+            }
+
+            // 檢查是否有其他帳號
+            const { data: existing } = await supabaseClient
+                .from('speech_api_accounts')
+                .select('id')
+                .eq('user_id', currentUser.id);
+
+            const isFirst = !existing || existing.length === 0;
+
+            // 新增帳號
+            const { error } = await supabaseClient
+                .from('speech_api_accounts')
+                .insert({
+                    user_id: currentUser.id,
+                    name: name,
+                    provider: 'google',
+                    credentials: credentials,
+                    is_active: isFirst // 第一個帳號自動設為使用中
+                });
+
+            if (error) {
+                console.error('新增失敗:', error);
+                alert('新增失敗：' + error.message);
+                return;
+            }
+
+            hideAddModal();
+            loadAccounts();
+            alert('帳號新增成功！');
+        }
+
+        // 設為使用中
+        async function setActive(accountId) {
+            // 先將所有帳號設為非活動
+            await supabaseClient
+                .from('speech_api_accounts')
+                .update({ is_active: false })
+                .eq('user_id', currentUser.id);
+
+            // 設定指定帳號為活動
+            const { error } = await supabaseClient
+                .from('speech_api_accounts')
+                .update({ is_active: true })
+                .eq('id', accountId);
+
+            if (error) {
+                alert('設定失敗：' + error.message);
+                return;
+            }
+
+            loadAccounts();
+        }
+
+        // 刪除帳號
+        async function deleteAccount(accountId, accountName) {
+            if (!confirm(`確定要刪除「${accountName}」嗎？此操作無法復原。`)) {
+                return;
+            }
+
+            const { error } = await supabaseClient
+                .from('speech_api_accounts')
+                .delete()
+                .eq('id', accountId);
+
+            if (error) {
+                alert('刪除失敗：' + error.message);
+                return;
+            }
+
+            loadAccounts();
+        }
+
+        // 初始化
+        checkAuth();
+    </script>
+</body>
+
+</html>
