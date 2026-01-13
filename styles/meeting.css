@@ -324,9 +324,12 @@
 @media (max-width: 768px) {
     .meeting-header {
         padding: 0.6rem 1rem;
+        padding-top: 1.2rem;
+        /* 頂部間距，避開瀏覽器 URL 欄 */
         flex-wrap: nowrap;
         gap: 0.5rem;
     }
+
 
     .header-left {
         flex: 1;
