@@ -269,8 +269,10 @@
         }
 
 
-        // Google Cloud Speech-to-Text 設定
-        const GOOGLE_SPEECH_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/google-speech';
+
+        // OpenAI Whisper 設定
+        const GOOGLE_SPEECH_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/whisper-speech';
+
         let mediaRecorder = null;
         let audioStream = null;
         let recordingInterval = null;
@@ -338,7 +340,13 @@
 
                         try {
                             const { data: { session } } = await supabaseClient.auth.getSession();
-                            if (!session) return;
+                            if (!session) {
+                                console.error('No session found');
+                                return;
+                            }
+
+                            console.log('📤 傳送音訊到 Google Speech API...');
+                            console.log('Audio size:', base64Audio.length, 'bytes');
 
                             const response = await fetch(GOOGLE_SPEECH_URL, {
                                 method: 'POST',
@@ -352,10 +360,13 @@
                                 })
                             });
 
+                            console.log('📥 回應狀態:', response.status);
                             const result = await response.json();
+                            console.log('📥 回應內容:', result);
 
                             if (result.error) {
-                                console.error('辨識錯誤:', result.error);
+                                console.error('❌ 辨識錯誤:', result.error);
+                                showInterimCaption('錯誤: ' + result.error);
                                 if (result.error.includes('No active API account')) {
                                     stopDeepgramStream();
                                     alert('請先在「語音 API 設定」中新增並啟用 Google Cloud 帳號');
@@ -365,13 +376,18 @@
                             }
 
                             if (result.transcript && result.transcript.trim()) {
+                                console.log('✅ 辨識結果:', result.transcript);
                                 showLocalCaption(result.transcript);
                                 saveCaption(result.transcript);
+                            } else {
+                                console.log('⚠️ 沒有辨識到任何內容');
                             }
 
                         } catch (error) {
-                            console.error('傳送失敗:', error);
+                            console.error('❌ 傳送失敗:', error);
+                            showInterimCaption('傳送失敗: ' + error.message);
                         }
+
                     };
                     reader.readAsDataURL(audioBlob);
                 };
