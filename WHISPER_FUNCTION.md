@@ -1,16 +1,6 @@
-# OpenAI Whisper Edge Function
+# OpenAI Whisper Edge Function - 優化版
 
-**步驟 1**：取得 OpenAI API Key
-- 前往 https://platform.openai.com/api-keys
-- 創建新的 API Key
-
-**步驟 2**：新增 Supabase Secret
-- 前往 Supabase → Edge Functions → Secrets
-- 新增：`OPENAI_API_KEY` = 您的 API Key
-
-**步驟 3**：創建新的 Edge Function
-- 名稱：`whisper-speech`
-- 貼上以下代碼：
+**請用這個優化版取代現有的 whisper-speech 代碼**：
 
 ```typescript
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -62,6 +52,14 @@ serve(async (req) => {
       });
     }
 
+    // 檢查音訊大小 - 太小可能只是噪音
+    if (audio.length < 1000) {
+      console.log("⚠️ 音訊太短，跳過");
+      return new Response(JSON.stringify({ transcript: "", success: true }), {
+        headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
+    }
+
     console.log("✅ 音訊長度:", audio.length);
 
     // 將 base64 轉換為 blob
@@ -74,6 +72,9 @@ serve(async (req) => {
     formData.append("model", "whisper-1");
     formData.append("language", language === "zh-TW" ? "zh" : language === "en-US" ? "en" : "zh");
     formData.append("response_format", "json");
+    
+    // 添加 prompt 來減少幻覺
+    formData.append("prompt", "這是一段會議對話的語音記錄，請準確轉錄實際說話的內容。如果沒有人說話，請返回空白。");
 
     console.log("📤 呼叫 OpenAI Whisper API...");
 
@@ -96,9 +97,27 @@ serve(async (req) => {
       });
     }
 
-    console.log("✅ 轉錄結果:", result.text);
+    // 過濾掉可能的幻覺內容
+    let transcript = result.text || "";
+    
+    // 如果結果看起來像是幻覺（包含特定模式），則忽略
+    const hallucinations = [
+      "youtube", "subscribe", "點讚", "訂閱", "轉發", "打賞", "支持",
+      "www.", ".com", "http", "感謝收看", "感謝觀看", "下期見"
+    ];
+    
+    const isHallucination = hallucinations.some(h => 
+      transcript.toLowerCase().includes(h.toLowerCase())
+    );
+    
+    if (isHallucination) {
+      console.log("⚠️ 檢測到幻覺內容，忽略:", transcript);
+      transcript = "";
+    }
 
-    return new Response(JSON.stringify({ transcript: result.text, success: true }), {
+    console.log("✅ 轉錄結果:", transcript);
+
+    return new Response(JSON.stringify({ transcript, success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
 
@@ -111,9 +130,7 @@ serve(async (req) => {
 });
 ```
 
-**步驟 4**：關閉 JWT 驗證
-- 部署後，到 Details 分頁
-- 關閉 "Verify JWT with legacy secret"
-- Save changes
-
-完成後告訴我，我會更新 meeting.html！
+**變更**：
+1. 加入 prompt 引導 Whisper
+2. 過濾常見幻覺關鍵字
+3. 忽略過短的音訊

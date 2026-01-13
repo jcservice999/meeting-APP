@@ -394,19 +394,19 @@
 
                 mediaRecorder.start();
 
-                // 3 秒後停止並處理
+                // 6 秒後停止並處理（較長的音訊減少幻覺）
                 setTimeout(() => {
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
-                }, 3000);
+                }, 6000);
             }
 
             // 立即開始第一次錄音
             recordChunk();
 
-            // 每 3 秒循環
-            recordingInterval = setInterval(recordChunk, 3500);
+            // 每 7 秒循環
+            recordingInterval = setInterval(recordChunk, 7000);
         }
 
         // 停止 Google Speech 錄音
