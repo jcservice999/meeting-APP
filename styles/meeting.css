@@ -323,30 +323,34 @@
 /* 響應式設計 */
 @media (max-width: 768px) {
     .meeting-header {
-        padding: 0.6rem 1rem;
-        padding-top: 1.2rem;
-        /* 頂部間距，避開瀏覽器 URL 欄 */
-        flex-wrap: nowrap;
-        gap: 0.5rem;
+        padding: 0.8rem 1rem;
+        padding-top: 1rem;
+        flex-wrap: wrap;
+        /* 允許換行 */
+        gap: 0.8rem;
     }
 
-
+    /* 標題獨立一排 */
     .header-left {
-        flex: 1;
-        min-width: 0;
+        width: 100%;
+        flex: none;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
     }
 
     .header-left h1 {
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
+        font-size: 1rem;
     }
 
+    /* 控制按鈕第二排 */
     .header-right {
+        width: 100%;
         display: flex;
+        justify-content: flex-start;
         gap: 0.5rem;
-        flex-shrink: 0;
     }
+
 
     /* 參與者網格 - 手機優化 */
     .participant-grid {
