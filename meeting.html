@@ -269,147 +269,146 @@
         }
 
 
-        // Deepgram 設定
-        const DEEPGRAM_TOKEN_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/deepgram-token';
-        let deepgramSocket = null;
+        // Google Cloud Speech-to-Text 設定
+        const GOOGLE_SPEECH_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/google-speech';
         let mediaRecorder = null;
         let audioStream = null;
+        let recordingInterval = null;
+        let audioChunks = [];
 
-        // 開始 Deepgram 串流
+        // 開始 Google Speech 錄音
         async function startDeepgramStream() {
             try {
-                // 取得 Deepgram API Key
-                const response = await fetch(DEEPGRAM_TOKEN_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    }
-                });
-
-                const { apiKey, error } = await response.json();
-                if (error) throw new Error(error);
-
                 // 取得麥克風權限
                 audioStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
                         noiseSuppression: true,
-                        sampleRate: 16000
+                        sampleRate: 48000
                     }
                 });
 
-                // 取得語言設定
-                const language = document.getElementById('languageSelect').value;
-                const langCode = language === 'zh-TW' ? 'zh-TW' :
-                    language === 'en-US' ? 'en' :
-                        language === 'ja-JP' ? 'ja' : 'zh-TW';
+                console.log('✅ Google Cloud Speech-to-Text 已啟動');
+                showInterimCaption('正在聆聽...');
 
-                // 建立 Deepgram WebSocket 連線 - 優化參數
-                const deepgramParams = new URLSearchParams({
-                    model: 'nova-2',           // 最新模型
-                    language: langCode,
-                    smart_format: 'true',      // 智能格式化
-                    punctuate: 'true',         // 自動標點
-                    interim_results: 'true',   // 即時結果
-                    utterance_end_ms: '1500',  // 句子結束等待 1.5 秒（防止截斷）
-                    endpointing: '500',        // 語音停頓檢測 500ms
-                    vad_events: 'true',        // 語音活動檢測
-                    diarize: 'true'            // 多人說話辨識
-                });
-                const deepgramUrl = `wss://api.deepgram.com/v1/listen?${deepgramParams.toString()}`;
-
-                deepgramSocket = new WebSocket(deepgramUrl, ['token', apiKey]);
-
-                deepgramSocket.onopen = () => {
-                    console.log('✅ Deepgram WebSocket 已連線（優化版）');
-
-                    // 開始錄音並傳送到 Deepgram - 增加間隔到 500ms
-                    mediaRecorder = new MediaRecorder(audioStream, {
-                        mimeType: 'audio/webm;codecs=opus'
-                    });
-
-                    mediaRecorder.ondataavailable = (event) => {
-                        if (event.data.size > 0 && deepgramSocket?.readyState === WebSocket.OPEN) {
-                            deepgramSocket.send(event.data);
-                        }
-                    };
-
-                    mediaRecorder.start(500); // 每 500ms 傳送一次（減少切割）
-                };
-
-                let transcriptBuffer = '';
-                let lastTranscriptTime = Date.now();
-                let saveTimeout = null;
-
-                deepgramSocket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-
-                    if (data.channel?.alternatives?.[0]) {
-                        const transcript = data.channel.alternatives[0].transcript;
-                        const isFinal = data.is_final;
-                        const speechFinal = data.speech_final; // 語句完全結束
-
-                        if (transcript) {
-                            if (isFinal) {
-                                showLocalCaption(transcript);
-                                transcriptBuffer += transcript + ' ';
-                                lastTranscriptTime = Date.now();
-
-                                // 清除之前的計時器
-                                if (saveTimeout) clearTimeout(saveTimeout);
-
-                                // 如果是語句完全結束，或等待 1.5 秒後儲存
-                                const delay = speechFinal ? 500 : 1500;
-                                saveTimeout = setTimeout(() => {
-                                    if (Date.now() - lastTranscriptTime >= delay && transcriptBuffer.trim()) {
-                                        saveCaption(transcriptBuffer.trim());
-                                        transcriptBuffer = '';
-                                    }
-                                }, delay + 100);
-                            } else {
-                                showInterimCaption(transcript);
-                            }
-                        }
-                    }
-                };
-
-
-                deepgramSocket.onerror = (error) => {
-                    console.error('Deepgram 錯誤:', error);
-                };
-
-                deepgramSocket.onclose = () => {
-                    console.log('Deepgram 已關閉');
-                    if (transcriptBuffer.trim()) {
-                        saveCaption(transcriptBuffer.trim());
-                        transcriptBuffer = '';
-                    }
-                };
+                // 開始錄音循環
+                startRecordingLoop();
 
                 return true;
 
             } catch (error) {
-                console.error('Deepgram 初始化失敗:', error);
-                alert('語音辨識初始化失敗：' + error.message);
+                console.error('語音辨識初始化失敗:', error);
+                if (error.message.includes('No active API account')) {
+                    alert('請先在「語音 API 設定」中新增並啟用 Google Cloud 帳號');
+                    window.location.href = 'settings.html';
+                } else {
+                    alert('語音辨識初始化失敗：' + error.message);
+                }
                 return false;
             }
         }
 
-        // 停止 Deepgram 串流
+        // 錄音循環 - 每 3 秒處理一次
+        function startRecordingLoop() {
+            const language = document.getElementById('languageSelect').value;
+
+            function recordChunk() {
+                if (!audioStream) return;
+
+                audioChunks = [];
+                mediaRecorder = new MediaRecorder(audioStream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
+
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    if (audioChunks.length === 0) return;
+
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+
+                    // 轉換為 Base64
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64Audio = reader.result.split(',')[1];
+
+                        try {
+                            const { data: { session } } = await supabaseClient.auth.getSession();
+                            if (!session) return;
+
+                            const response = await fetch(GOOGLE_SPEECH_URL, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${session.access_token}`
+                                },
+                                body: JSON.stringify({
+                                    audio: base64Audio,
+                                    language: language
+                                })
+                            });
+
+                            const result = await response.json();
+
+                            if (result.error) {
+                                console.error('辨識錯誤:', result.error);
+                                if (result.error.includes('No active API account')) {
+                                    stopDeepgramStream();
+                                    alert('請先在「語音 API 設定」中新增並啟用 Google Cloud 帳號');
+                                    window.location.href = 'settings.html';
+                                }
+                                return;
+                            }
+
+                            if (result.transcript && result.transcript.trim()) {
+                                showLocalCaption(result.transcript);
+                                saveCaption(result.transcript);
+                            }
+
+                        } catch (error) {
+                            console.error('傳送失敗:', error);
+                        }
+                    };
+                    reader.readAsDataURL(audioBlob);
+                };
+
+                mediaRecorder.start();
+
+                // 3 秒後停止並處理
+                setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                }, 3000);
+            }
+
+            // 立即開始第一次錄音
+            recordChunk();
+
+            // 每 3 秒循環
+            recordingInterval = setInterval(recordChunk, 3500);
+        }
+
+        // 停止 Google Speech 錄音
         function stopDeepgramStream() {
+            if (recordingInterval) {
+                clearInterval(recordingInterval);
+                recordingInterval = null;
+            }
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
-            }
-            if (deepgramSocket) {
-                deepgramSocket.close();
-                deepgramSocket = null;
             }
             if (audioStream) {
                 audioStream.getTracks().forEach(track => track.stop());
                 audioStream = null;
             }
+            console.log('⏹️ Google Cloud Speech-to-Text 已停止');
         }
+
 
         // 初始化語音識別
 
