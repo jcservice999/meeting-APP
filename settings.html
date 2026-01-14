@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-    <title>語音 API 設定 - 會議軟體</title>
+    <title>AssemblyAI API 設定 - 會議軟體</title>
     <link rel="stylesheet" href="styles/common.css">
     <script src="https://unpkg.com/@supabase/supabase-js@2"></script>
     <style>
@@ -47,6 +47,12 @@
             background: rgba(99, 102, 241, 0.1);
         }
 
+        .account-card.exhausted {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            opacity: 0.7;
+        }
+
         .account-header {
             display: flex;
             justify-content: space-between;
@@ -59,18 +65,38 @@
             font-weight: 600;
         }
 
+        .account-badges {
+            display: flex;
+            gap: 0.5rem;
+        }
+
         .account-badge {
-            background: var(--primary-color);
-            color: white;
             padding: 0.25rem 0.75rem;
             border-radius: 20px;
             font-size: 0.8rem;
+        }
+
+        .badge-active {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .badge-exhausted {
+            background: #ef4444;
+            color: white;
         }
 
         .account-info {
             color: var(--text-muted);
             font-size: 0.9rem;
             margin-bottom: 1rem;
+        }
+
+        .api-key-display {
+            font-family: monospace;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
         }
 
         .account-actions {
@@ -94,7 +120,7 @@
             margin-bottom: 1rem;
         }
 
-        /* 新增帳號 Modal */
+        /* Modal */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -163,22 +189,26 @@
             font-size: 1rem;
         }
 
-        .form-textarea {
-            min-height: 200px;
-            font-family: monospace;
-            font-size: 0.85rem;
-        }
-
         .form-help {
             font-size: 0.85rem;
             color: var(--text-muted);
             margin-top: 0.5rem;
         }
 
+        .form-help a {
+            color: var(--primary-color);
+        }
+
         .alert {
             padding: 1rem;
             border-radius: 8px;
             margin-bottom: 1rem;
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #3b82f6;
         }
 
         .alert-warning {
@@ -192,48 +222,55 @@
 <body>
     <div class="settings-container">
         <header class="page-header">
-            <h1 class="page-title">🎤 語音 API 設定</h1>
+            <h1 class="page-title">🎤 AssemblyAI API 設定</h1>
             <button class="btn btn-secondary" onclick="window.location.href='index.html'">返回首頁</button>
         </header>
 
+        <div class="alert alert-info">
+            💡 AssemblyAI 提供 <strong>$50 免費額度</strong>（約 333 小時串流轉錄）。
+            <a href="https://www.assemblyai.com/" target="_blank">註冊帳號 →</a>
+        </div>
+
         <div class="alert alert-warning">
-            ⚠️ 您的 API 憑證會安全地儲存在資料庫中，不會出現在前端程式碼。
+            ⚠️ 您的 API Key 會安全地儲存在資料庫中。當額度用完時，系統會自動切換到下一個可用的 API Key。
         </div>
 
         <div style="margin-bottom: 1.5rem;">
-            <button class="btn btn-primary" onclick="showAddModal()">+ 新增 API 帳號</button>
+            <button class="btn btn-primary" onclick="showAddModal()">+ 新增 API Key</button>
         </div>
 
         <div id="accountList" class="account-list">
             <div class="empty-state">
                 <div class="empty-state-icon">🔑</div>
-                <p>尚未新增任何 API 帳號</p>
-                <p>點擊上方按鈕新增您的 Google Cloud 憑證</p>
+                <p>尚未新增任何 API Key</p>
+                <p>點擊上方按鈕新增您的 AssemblyAI API Key</p>
             </div>
         </div>
     </div>
 
-    <!-- 新增帳號 Modal -->
+    <!-- 新增 Modal -->
     <div id="addModal" class="modal-overlay">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 class="modal-title">新增 API 帳號</h2>
+                <h2 class="modal-title">新增 AssemblyAI API Key</h2>
                 <button class="modal-close" onclick="hideAddModal()">&times;</button>
             </div>
             <form id="addAccountForm" onsubmit="handleAddAccount(event)">
                 <div class="form-group">
-                    <label class="form-label">帳號名稱</label>
-                    <input type="text" class="form-input" id="accountName" placeholder="例如：公司帳號、個人帳號" required>
+                    <label class="form-label">名稱（方便識別）</label>
+                    <input type="text" class="form-input" id="accountName" placeholder="例如：我的帳號、公司帳號" required>
                 </div>
                 <div class="form-group">
-                    <label class="form-label">JSON 憑證</label>
-                    <textarea class="form-input form-textarea" id="accountCredentials"
-                        placeholder='貼上您的 Google Cloud 服務帳戶 JSON 內容...' required></textarea>
-                    <p class="form-help">請打開下載的 JSON 檔案，複製全部內容貼到這裡</p>
+                    <label class="form-label">API Key</label>
+                    <input type="text" class="form-input" id="apiKey" placeholder="貼上您的 AssemblyAI API Key" required>
+                    <p class="form-help">
+                        在 <a href="https://www.assemblyai.com/app" target="_blank">AssemblyAI Dashboard</a>
+                        的 API Keys 頁面取得
+                    </p>
                 </div>
                 <div style="display: flex; gap: 1rem;">
                     <button type="button" class="btn btn-secondary" onclick="hideAddModal()">取消</button>
-                    <button type="submit" class="btn btn-primary" style="flex: 1;">新增帳號</button>
+                    <button type="submit" class="btn btn-primary" style="flex: 1;">新增</button>
                 </div>
             </form>
         </div>
@@ -263,8 +300,9 @@
         async function loadAccounts() {
             const { data, error } = await supabaseClient
                 .from('speech_api_accounts')
-                .select('id, name, provider, is_active, created_at')
+                .select('id, name, provider, api_key, is_active, api_exhausted, exhausted_at, created_at')
                 .eq('user_id', currentUser.id)
+                .eq('provider', 'assemblyai')
                 .order('created_at', { ascending: false });
 
             if (error) {
@@ -283,32 +321,52 @@
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon">🔑</div>
-                        <p>尚未新增任何 API 帳號</p>
-                        <p>點擊上方按鈕新增您的 Google Cloud 憑證</p>
+                        <p>尚未新增任何 API Key</p>
+                        <p>點擊上方按鈕新增您的 AssemblyAI API Key</p>
                     </div>
                 `;
                 return;
             }
 
-            container.innerHTML = accounts.map(account => `
-                <div class="account-card ${account.is_active ? 'active' : ''}">
-                    <div class="account-header">
-                        <span class="account-name">${account.name}</span>
-                        ${account.is_active ? '<span class="account-badge">使用中</span>' : ''}
+            container.innerHTML = accounts.map(account => {
+                const maskedKey = account.api_key ?
+                    account.api_key.substring(0, 8) + '...' + account.api_key.substring(account.api_key.length - 4) :
+                    '***';
+
+                let cardClass = 'account-card';
+                if (account.api_exhausted) {
+                    cardClass += ' exhausted';
+                } else if (account.is_active) {
+                    cardClass += ' active';
+                }
+
+                return `
+                    <div class="${cardClass}">
+                        <div class="account-header">
+                            <span class="account-name">${account.name}</span>
+                            <div class="account-badges">
+                                ${account.api_exhausted ? '<span class="account-badge badge-exhausted">額度已用盡</span>' : ''}
+                                ${account.is_active && !account.api_exhausted ? '<span class="account-badge badge-active">使用中</span>' : ''}
+                            </div>
+                        </div>
+                        <div class="account-info">
+                            <span class="api-key-display">${maskedKey}</span>
+                            <span> · </span>
+                            <span>新增於 ${new Date(account.created_at).toLocaleDateString('zh-TW')}</span>
+                            ${account.exhausted_at ? `<span> · 額度用盡於 ${new Date(account.exhausted_at).toLocaleDateString('zh-TW')}</span>` : ''}
+                        </div>
+                        <div class="account-actions">
+                            ${!account.is_active && !account.api_exhausted ? `
+                                <button class="btn btn-primary btn-sm" onclick="setActive('${account.id}')">設為使用中</button>
+                            ` : ''}
+                            ${account.api_exhausted ? `
+                                <button class="btn btn-secondary btn-sm" onclick="resetExhausted('${account.id}')">重置狀態</button>
+                            ` : ''}
+                            <button class="btn btn-danger btn-sm" onclick="deleteAccount('${account.id}', '${account.name}')">刪除</button>
+                        </div>
                     </div>
-                    <div class="account-info">
-                        <span>供應商：${account.provider === 'google' ? 'Google Cloud' : account.provider}</span>
-                        <span> · </span>
-                        <span>新增於 ${new Date(account.created_at).toLocaleDateString('zh-TW')}</span>
-                    </div>
-                    <div class="account-actions">
-                        ${!account.is_active ? `
-                            <button class="btn btn-primary btn-sm" onclick="setActive('${account.id}')">設為使用中</button>
-                        ` : ''}
-                        <button class="btn btn-danger btn-sm" onclick="deleteAccount('${account.id}', '${account.name}')">刪除</button>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         }
 
         // 顯示新增 Modal
@@ -327,16 +385,11 @@
             event.preventDefault();
 
             const name = document.getElementById('accountName').value.trim();
-            const credentials = document.getElementById('accountCredentials').value.trim();
+            const apiKey = document.getElementById('apiKey').value.trim();
 
-            // 驗證 JSON 格式
-            try {
-                const parsed = JSON.parse(credentials);
-                if (!parsed.type || !parsed.project_id || !parsed.private_key) {
-                    throw new Error('缺少必要欄位');
-                }
-            } catch (e) {
-                alert('JSON 格式無效，請確認您貼上的是完整的服務帳戶 JSON 內容');
+            // 驗證 API Key 格式（通常以特定字符開頭）
+            if (apiKey.length < 10) {
+                alert('API Key 格式無效，請確認您貼上的是完整的 API Key');
                 return;
             }
 
@@ -344,7 +397,9 @@
             const { data: existing } = await supabaseClient
                 .from('speech_api_accounts')
                 .select('id')
-                .eq('user_id', currentUser.id);
+                .eq('user_id', currentUser.id)
+                .eq('provider', 'assemblyai')
+                .eq('api_exhausted', false);
 
             const isFirst = !existing || existing.length === 0;
 
@@ -354,9 +409,10 @@
                 .insert({
                     user_id: currentUser.id,
                     name: name,
-                    provider: 'google',
-                    credentials: credentials,
-                    is_active: isFirst // 第一個帳號自動設為使用中
+                    provider: 'assemblyai',
+                    api_key: apiKey,
+                    is_active: isFirst,
+                    api_exhausted: false
                 });
 
             if (error) {
@@ -367,7 +423,7 @@
 
             hideAddModal();
             loadAccounts();
-            alert('帳號新增成功！');
+            alert('API Key 新增成功！');
         }
 
         // 設為使用中
@@ -376,7 +432,8 @@
             await supabaseClient
                 .from('speech_api_accounts')
                 .update({ is_active: false })
-                .eq('user_id', currentUser.id);
+                .eq('user_id', currentUser.id)
+                .eq('provider', 'assemblyai');
 
             // 設定指定帳號為活動
             const { error } = await supabaseClient
@@ -386,6 +443,25 @@
 
             if (error) {
                 alert('設定失敗：' + error.message);
+                return;
+            }
+
+            loadAccounts();
+        }
+
+        // 重置額度狀態
+        async function resetExhausted(accountId) {
+            if (!confirm('確定要重置此 API Key 的額度狀態嗎？')) {
+                return;
+            }
+
+            const { error } = await supabaseClient
+                .from('speech_api_accounts')
+                .update({ api_exhausted: false, exhausted_at: null })
+                .eq('id', accountId);
+
+            if (error) {
+                alert('重置失敗：' + error.message);
                 return;
             }
 

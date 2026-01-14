@@ -270,8 +270,8 @@
 
 
 
-        // OpenAI Whisper 設定
-        const GOOGLE_SPEECH_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/whisper-speech';
+        // AssemblyAI 語音轉錄設定
+        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
 
         let mediaRecorder = null;
         let audioStream = null;
@@ -402,10 +402,10 @@
                                 return;
                             }
 
-                            console.log('📤 傳送音訊到 Google Speech API...');
+                            console.log('📤 傳送音訊到 AssemblyAI...');
                             console.log('Audio size:', base64Audio.length, 'bytes');
 
-                            const response = await fetch(GOOGLE_SPEECH_URL, {
+                            const response = await fetch(SPEECH_API_URL, {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -424,9 +424,9 @@
                             if (result.error) {
                                 console.error('❌ 辨識錯誤:', result.error);
                                 showInterimCaption('錯誤: ' + result.error);
-                                if (result.error.includes('No active API account')) {
+                                if (result.error.includes('No active') || result.error.includes('exhausted')) {
                                     stopDeepgramStream();
-                                    alert('請先在「語音 API 設定」中新增並啟用 Google Cloud 帳號');
+                                    alert('請先在「AssemblyAI API 設定」中新增 API Key');
                                     window.location.href = 'settings.html';
                                 }
                                 return;
