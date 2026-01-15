@@ -425,7 +425,7 @@
         }
 
         // VAD 設定
-        const VAD_THRESHOLD = 15;  // 音量閾值，可調整 (0-255)
+        const VAD_THRESHOLD = 8;  // 降低閾值讓更多音訊通過 (0-255)
         let vadMaxVolume = 0;      // 錄音期間的最大音量
         let vadAnalyser = null;    // VAD 專用的分析器
         let vadInterval = null;    // VAD 檢測定時器
