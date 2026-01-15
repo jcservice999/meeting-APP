@@ -282,18 +282,17 @@
 
 
 
-        // AssemblyAI Streaming 語音轉錄設定
-        const ASSEMBLYAI_TOKEN_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-token';
 
-        let assemblySocket = null;
-        let audioStream = null;
-        let assemblyAudioContext = null;
-        let audioWorklet = null;
+
+        // AssemblyAI Batch API 語音轉錄設定
+        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
+
         let mediaRecorder = null;
+        let audioStream = null;
         let recordingInterval = null;
         let audioChunks = [];
 
-        // 開始 AssemblyAI Streaming 錄音
+        // 開始 AssemblyAI Batch 錄音
         async function startDeepgramStream() {
             try {
                 // 取得麥克風權限
@@ -301,76 +300,15 @@
                     audio: {
                         echoCancellation: true,
                         noiseSuppression: true,
-                        sampleRate: 16000 // AssemblyAI 需要 16kHz
+                        sampleRate: 48000
                     }
                 });
 
-                // 取得 AssemblyAI Streaming Token
-                const { data: { session } } = await supabaseClient.auth.getSession();
-                if (!session) {
-                    throw new Error('請先登入');
-                }
+                console.log('✅ AssemblyAI Batch 語音轉錄已啟動');
+                showInterimCaption('正在聆聽...');
 
-                const tokenRes = await fetch(ASSEMBLYAI_TOKEN_URL, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${session.access_token}`
-                    },
-                    body: JSON.stringify({ roomId: MEETING_ID })
-                });
-
-                const tokenData = await tokenRes.json();
-                if (tokenData.error) {
-                    throw new Error(tokenData.error);
-                }
-
-                const language = document.getElementById('languageSelect').value;
-                console.log('選擇語言:', language);
-
-                // 建立 WebSocket 連接（v3 Universal Streaming API）
-                const wsUrl = `wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&encoding=pcm_s16le&token=${tokenData.token}`;
-                console.log('WebSocket URL:', wsUrl.substring(0, 80) + '...');
-                assemblySocket = new WebSocket(wsUrl);
-
-                assemblySocket.onopen = () => {
-                    console.log('✅ AssemblyAI Universal Streaming 已連接');
-                    showInterimCaption('正在聆聽...');
-                    startAudioStreaming();
-                };
-
-                assemblySocket.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-
-                    // 新的 v3 API 訊息格式
-                    if (data.type === 'Turn' && data.transcript) {
-                        if (data.end_of_turn) {
-                            console.log('✅ 完整句子:', data.transcript);
-                            showLocalCaption(data.transcript);
-                            saveCaption(data.transcript);
-                        } else {
-                            console.log('⏳ 即時轉錄:', data.transcript);
-                            showInterimCaption(data.transcript);
-                        }
-                    } else if (data.type === 'Begin') {
-                        console.log('📍 Session 開始:', data.id);
-                    } else if (data.type === 'Termination') {
-                        console.log('📍 Session 結束');
-                    } else if (data.type === 'Error') {
-                        console.error('❌ AssemblyAI 錯誤:', data.message);
-                    }
-                };
-
-                assemblySocket.onerror = (error) => {
-                    console.error('❌ WebSocket 錯誤:', error);
-                };
-
-                assemblySocket.onclose = (event) => {
-                    console.log('🔌 WebSocket 已關閉:', event.code, event.reason);
-                    if (event.code === 4001 || event.code === 4000) {
-                        alert('AssemblyAI 認證失敗，請檢查 API Key');
-                    }
-                };
+                // 開始錄音循環
+                startRecordingLoop();
 
                 return true;
 
@@ -386,48 +324,104 @@
             }
         }
 
-        // 開始音訊串流到 WebSocket
-        function startAudioStreaming() {
-            if (!audioStream || !assemblySocket) return;
+        // 錄音循環 - 每 6 秒處理一次
+        function startRecordingLoop() {
+            const language = document.getElementById('languageSelect').value;
 
-            // 使用原生採樣率（通常 44100 或 48000）
-            assemblyAudioContext = new (window.AudioContext || window.webkitAudioContext)();
-            const nativeSampleRate = assemblyAudioContext.sampleRate;
-            console.log('原生採樣率:', nativeSampleRate);
+            // 啟動 VAD 監測
+            if (audioStream) {
+                startVADMonitoring(audioStream);
+            }
 
-            const source = assemblyAudioContext.createMediaStreamSource(audioStream);
-            const processor = assemblyAudioContext.createScriptProcessor(4096, 1, 1);
+            function recordChunk() {
+                if (!audioStream) return;
 
-            source.connect(processor);
-            processor.connect(assemblyAudioContext.destination);
+                // 重置這一輪的最大音量
+                vadMaxVolume = 0;
 
-            processor.onaudioprocess = (event) => {
-                if (assemblySocket && assemblySocket.readyState === WebSocket.OPEN) {
-                    const inputData = event.inputBuffer.getChannelData(0);
+                audioChunks = [];
+                mediaRecorder = new MediaRecorder(audioStream, {
+                    mimeType: 'audio/webm;codecs=opus'
+                });
 
-                    // 重新採樣到 16kHz
-                    const targetSampleRate = 16000;
-                    const ratio = nativeSampleRate / targetSampleRate;
-                    const newLength = Math.floor(inputData.length / ratio);
-                    const resampledData = new Float32Array(newLength);
+                mediaRecorder.ondataavailable = (event) => {
+                    if (event.data.size > 0) {
+                        audioChunks.push(event.data);
+                    }
+                };
 
-                    for (let i = 0; i < newLength; i++) {
-                        resampledData[i] = inputData[Math.floor(i * ratio)];
+                mediaRecorder.onstop = async () => {
+                    if (audioChunks.length === 0) return;
+
+                    // VAD 檢查
+                    const maxVol = vadMaxVolume;
+                    console.log(`🔊 音量: ${maxVol.toFixed(1)} (閾值: ${VAD_THRESHOLD})`);
+
+                    if (maxVol < VAD_THRESHOLD) {
+                        console.log('⏭️ 音量過低，跳過');
+                        showInterimCaption('正在聆聽...');
+                        return;
                     }
 
-                    // 轉換為 16-bit PCM
-                    const pcmData = new Int16Array(resampledData.length);
-                    for (let i = 0; i < resampledData.length; i++) {
-                        pcmData[i] = Math.max(-32768, Math.min(32767, resampledData[i] * 32768));
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    const reader = new FileReader();
+                    reader.onloadend = async () => {
+                        const base64Audio = reader.result.split(',')[1];
+
+                        try {
+                            const { data: { session } } = await supabaseClient.auth.getSession();
+                            if (!session) return;
+
+                            console.log('📤 傳送音訊到 AssemblyAI...');
+
+                            const response = await fetch(SPEECH_API_URL, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'Authorization': `Bearer ${session.access_token}`
+                                },
+                                body: JSON.stringify({
+                                    audio: base64Audio,
+                                    language: language,
+                                    roomId: MEETING_ID
+                                })
+                            });
+
+                            const result = await response.json();
+
+                            if (result.error) {
+                                console.error('❌ 辨識錯誤:', result.error);
+                                if (result.error.includes('No active') || result.error.includes('exhausted')) {
+                                    stopDeepgramStream();
+                                    alert('API Key 已用盡或無效');
+                                    window.location.href = 'settings.html';
+                                }
+                                return;
+                            }
+
+                            if (result.transcript && result.transcript.trim()) {
+                                console.log('✅ 辨識結果:', result.transcript);
+                                showLocalCaption(result.transcript);
+                                saveCaption(result.transcript);
+                            }
+
+                        } catch (error) {
+                            console.error('❌ 傳送失敗:', error);
+                        }
+                    };
+                    reader.readAsDataURL(audioBlob);
+                };
+
+                mediaRecorder.start();
+                setTimeout(() => {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
                     }
+                }, 6000);
+            }
 
-                    // v3 API: 直接傳送 raw binary audio
-                    assemblySocket.send(pcmData.buffer);
-                }
-            };
-
-            audioWorklet = processor;
-            console.log('🎙️ 音訊串流已開始');
+            recordChunk();
+            recordingInterval = setInterval(recordChunk, 7000);
         }
 
         // VAD 設定
@@ -469,30 +463,23 @@
             vadAnalyser = null;
         }
 
-        // 注意：startRecordingLoop 已移除，改用 WebSocket 即時串流 (startAudioStreaming)
-
-        // 停止 AssemblyAI Streaming
+        // 停止錄音
         function stopDeepgramStream() {
-            // 關閉 WebSocket
-            if (assemblySocket) {
-                assemblySocket.close();
-                assemblySocket = null;
-            }
+            // 停止 VAD 監測
+            stopVADMonitoring();
 
-            // 停止 AudioContext
-            if (assemblyAudioContext) {
-                assemblyAudioContext.close();
-                assemblyAudioContext = null;
+            if (recordingInterval) {
+                clearInterval(recordingInterval);
+                recordingInterval = null;
             }
-
-            // 停止音訊串流
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
             if (audioStream) {
                 audioStream.getTracks().forEach(track => track.stop());
                 audioStream = null;
             }
-
-            audioWorklet = null;
-            console.log('⏹️ AssemblyAI Streaming 已停止');
+            console.log('⏹️ AssemblyAI 已停止');
         }
 
 
