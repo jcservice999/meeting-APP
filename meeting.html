@@ -85,13 +85,6 @@
         let participantsChannel = null;
         let captionsChannel = null;
 
-        // PeerJS 語音通話
-        let peer = null;
-        let localStream = null;
-        let peerConnections = new Map(); // peerId -> call
-        let isMicOn = true;
-        let isSpeakerOn = true;
-        let voiceChannel = null;
 
         // 檢查房間存取權限
         async function checkRoomAccess() {
@@ -483,7 +476,142 @@
         }
 
 
-        // 初始化語音識別
+        // ========== PeerJS 語音通話 ==========
+        let peer = null;
+        let localStream = null;
+        let voiceChannel = null;
+        let peerConnections = new Map();
+        let isMicOn = true;
+        let isSpeakerOn = true;
+
+        async function initPeerVoice() {
+            try {
+                // 取得麥克風權限
+                localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+                console.log('✅ 取得麥克風權限');
+
+                // 建立 PeerJS 連接（使用公共伺服器）
+                const peerId = `${MEETING_ID}-${currentUser.id.substring(0, 8)}`;
+                peer = new Peer(peerId, {
+                    debug: 1
+                });
+
+                peer.on('open', (id) => {
+                    console.log('✅ PeerJS 連接成功, ID:', id);
+                    broadcastPeerId(id);
+                });
+
+                peer.on('call', (call) => {
+                    console.log('📞 收到來電:', call.peer);
+                    call.answer(localStream);
+                    handleCall(call);
+                });
+
+                peer.on('error', (err) => {
+                    console.error('PeerJS 錯誤:', err);
+                });
+
+                updateVoiceButtons();
+
+            } catch (error) {
+                console.error('PeerJS 初始化失敗:', error);
+            }
+        }
+
+        function handleCall(call) {
+            call.on('stream', (remoteStream) => {
+                console.log('🎵 收到遠端音訊:', call.peer);
+                playRemoteAudio(remoteStream, call.peer);
+            });
+
+            call.on('close', () => {
+                console.log('📴 通話結束:', call.peer);
+                removeRemoteAudio(call.peer);
+                peerConnections.delete(call.peer);
+            });
+
+            peerConnections.set(call.peer, call);
+        }
+
+        function playRemoteAudio(stream, peerId) {
+            let audio = document.getElementById(`audio-${peerId}`);
+            if (!audio) {
+                audio = document.createElement('audio');
+                audio.id = `audio-${peerId}`;
+                audio.autoplay = true;
+                audio.playsInline = true;
+                audio.style.display = 'none';
+                document.body.appendChild(audio);
+            }
+            audio.srcObject = stream;
+            audio.muted = !isSpeakerOn;
+
+            audio.play().then(() => {
+                console.log('🔊 音訊播放成功:', peerId);
+            }).catch(err => {
+                console.error('❌ 音訊播放失敗:', err);
+            });
+        }
+
+        function removeRemoteAudio(peerId) {
+            const audio = document.getElementById(`audio-${peerId}`);
+            if (audio) audio.remove();
+        }
+
+        async function broadcastPeerId(peerId) {
+            voiceChannel = supabaseClient.channel(`voice-${MEETING_ID}`);
+
+            voiceChannel.on('broadcast', { event: 'peer-join' }, async (payload) => {
+                const remotePeerId = payload.payload.peerId;
+                if (remotePeerId !== peerId && !peerConnections.has(remotePeerId)) {
+                    console.log('📞 撥打給:', remotePeerId);
+                    const call = peer.call(remotePeerId, localStream);
+                    handleCall(call);
+                }
+            });
+
+            await voiceChannel.subscribe();
+
+            voiceChannel.send({
+                type: 'broadcast',
+                event: 'peer-join',
+                payload: { peerId }
+            });
+        }
+
+        function updateVoiceButtons() {
+            const micBtn = document.getElementById('micBtn');
+            const speakerBtn = document.getElementById('speakerBtn');
+
+            if (micBtn) {
+                micBtn.textContent = isMicOn ? '🎙️' : '🔇';
+                micBtn.style.opacity = isMicOn ? '1' : '0.5';
+            }
+            if (speakerBtn) {
+                speakerBtn.textContent = isSpeakerOn ? '🔊' : '🔈';
+                speakerBtn.style.opacity = isSpeakerOn ? '1' : '0.5';
+            }
+        }
+
+        function toggleMic() {
+            isMicOn = !isMicOn;
+            if (localStream) {
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = isMicOn;
+                });
+            }
+            updateVoiceButtons();
+            console.log('🎙️ 麥克風:', isMicOn ? '開啟' : '關閉');
+        }
+
+        function toggleSpeaker() {
+            isSpeakerOn = !isSpeakerOn;
+            document.querySelectorAll('audio[id^="audio-"]').forEach(audio => {
+                audio.muted = !isSpeakerOn;
+            });
+            updateVoiceButtons();
+            console.log('🔊 喇叭:', isSpeakerOn ? '開啟' : '關閉');
+        }
 
         function initSpeechRecognition() {
             if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
