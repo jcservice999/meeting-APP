@@ -1,6 +1,6 @@
-# OpenAI Whisper - 純 Prompt 版
+# OpenAI Whisper Edge Function - 支援自訂提示詞
 
-**只用 Whisper prompt，不加 GPT**：
+請在 Supabase Edge Functions 建立名為 `whisper-speech` 的函數，使用以下程式碼：
 
 ```typescript
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
@@ -19,7 +19,7 @@ serve(async (req) => {
   try {
     const openaiKey = Deno.env.get("OPENAI_API_KEY");
     if (!openaiKey) {
-      return new Response(JSON.stringify({ error: "No API key" }), {
+      return new Response(JSON.stringify({ error: "No OpenAI API key configured" }), {
         status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
@@ -40,7 +40,7 @@ serve(async (req) => {
       }
     }
 
-    const { audio, language } = await req.json();
+    const { audio, language, prompt } = await req.json();
     
     if (!audio || audio.length < 5000) {
       return new Response(JSON.stringify({ transcript: "", success: true }), {
@@ -57,8 +57,11 @@ serve(async (req) => {
     formData.append("language", language === "zh-TW" ? "zh" : language === "en-US" ? "en" : "zh");
     formData.append("response_format", "json");
     
-    // 英文 prompt（較不會被回顯），設定為會議對話情境
-    formData.append("prompt", "This is a meeting conversation recording. Transcribe only the actual spoken words. If there is silence, return empty.");
+    // 使用自訂提示詞，如果沒有則使用預設
+    const whisperPrompt = prompt || "This is a meeting conversation. Transcribe the spoken words accurately.";
+    formData.append("prompt", whisperPrompt);
+
+    console.log("Whisper prompt:", whisperPrompt);
 
     const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
       method: "POST",
@@ -69,7 +72,8 @@ serve(async (req) => {
     const result = await response.json();
 
     if (!response.ok) {
-      return new Response(JSON.stringify({ error: result.error?.message }), {
+      console.error("Whisper API error:", result);
+      return new Response(JSON.stringify({ error: result.error?.message || "API error" }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
     }
@@ -81,14 +85,14 @@ serve(async (req) => {
       transcript = "";
     }
 
-    console.log("結果:", transcript || "(空)");
+    console.log("Whisper result:", transcript || "(empty)");
 
     return new Response(JSON.stringify({ transcript, success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
 
   } catch (e) {
-    console.error("錯誤:", e);
+    console.error("Error:", e);
     return new Response(JSON.stringify({ error: String(e) }), {
       status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
     });
@@ -96,9 +100,19 @@ serve(async (req) => {
 });
 ```
 
-**變更**：
-- 使用**英文 prompt**（較不會被中文音訊回顯）
-- 移除所有硬編碼過濾
-- 只用 Whisper 自己的判斷
+## 重要設定
 
-請更新後測試！如果還是有問題，可能真的需要考慮本地 Whisper 或其他方案。
+1. **Supabase Secrets** - 需要設定 `OPENAI_API_KEY`
+2. **JWT 驗證** - 建議關閉（因為我們有自己的驗證）
+
+## 提示詞說明
+
+`prompt` 參數可以幫助 Whisper：
+- 識別特定術語（如公司名稱、產品名稱）
+- 設定語境（會議、訪談、講座等）
+- 改善特定語言的辨識
+
+範例提示詞：
+- `"這是商業會議的錄音，討論產品和業務。"`
+- `"JBS商學院的線上課程錄音。"`
+- `"Technical discussion about software development, APIs, and cloud services."`

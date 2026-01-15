@@ -28,6 +28,7 @@
                     <option value="en-US">English</option>
                 </select>
                 <button id="speakerBtn" class="btn-secondary" title="喇叭">🔊</button>
+                <button id="promptBtn" class="btn-secondary" title="設定提示詞">⚙️</button>
                 <button id="startBtn" class="btn-primary">開始錄音</button>
                 <button id="leaveBtn" class="btn-danger">離開會議</button>
             </div>
@@ -276,8 +277,11 @@
 
 
 
-        // AssemblyAI Batch API 語音轉錄設定
-        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
+        // Whisper API 語音轉錄設定
+        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/whisper-speech';
+
+        // 自訂提示詞（可改善辨識準確度）
+        let whisperPrompt = localStorage.getItem('whisperPrompt') || 'This is a meeting conversation. Transcribe the spoken words accurately.';
 
         let mediaRecorder = null;
         let audioStream = null;
@@ -380,7 +384,7 @@
                                 body: JSON.stringify({
                                     audio: base64Audio,
                                     language: language,
-                                    roomId: MEETING_ID
+                                    prompt: whisperPrompt
                                 })
                             });
 
@@ -1100,6 +1104,19 @@
             });
             updateVoiceButtons();
             console.log('喇叭:', isSpeakerOn ? '開啟' : '關閉');
+        });
+
+        // 提示詞設定
+        document.getElementById('promptBtn').addEventListener('click', () => {
+            const currentPrompt = localStorage.getItem('whisperPrompt') || 'This is a meeting conversation. Transcribe the spoken words accurately.';
+            const newPrompt = prompt('設定 Whisper 提示詞（可改善辨識準確度）：\n\n範例：\n• JBS商學院的會議錄音\n• 軟體開發技術討論\n• 商業會議，包含產品名稱和術語', currentPrompt);
+
+            if (newPrompt !== null) {
+                whisperPrompt = newPrompt;
+                localStorage.setItem('whisperPrompt', newPrompt);
+                console.log('✅ 提示詞已更新:', newPrompt);
+                alert('提示詞已儲存！');
+            }
         });
 
         // 進入會議室後自動連接語音
