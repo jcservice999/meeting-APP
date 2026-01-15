@@ -70,16 +70,13 @@ serve(async (req) => {
 
     const apiKey = accounts[0].api_key;
 
-    // 取得臨時 streaming token
-    const tokenRes = await fetch("https://api.assemblyai.com/v2/realtime/token", {
-      method: "POST",
+    // 取得臨時 streaming token（v3 Universal Streaming）
+    // 新的 v3 endpoint: https://streaming.assemblyai.com/v3/token
+    const tokenRes = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=3600", {
+      method: "GET",
       headers: {
-        "Authorization": apiKey,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        expires_in: 3600 // 1 小時有效
-      })
+        "Authorization": apiKey
+      }
     });
 
     if (!tokenRes.ok) {
