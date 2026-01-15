@@ -409,11 +409,11 @@
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
-                }, 3000);  // 改為 3 秒，加快字幕速度
+                }, 2000);  // 2 秒錄音
             }
 
             recordChunk();
-            recordingInterval = setInterval(recordChunk, 4000);  // 改為 4 秒循環
+            recordingInterval = setInterval(recordChunk, 2500);  // 2.5 秒循環
         }
 
         // VAD 設定
@@ -488,6 +488,13 @@
                 // 取得麥克風權限
                 localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
                 console.log('✅ 取得麥克風權限');
+
+                // ⚠️ 預設關閉麥克風，等使用者按「開始錄音」才開啟
+                localStream.getAudioTracks().forEach(track => {
+                    track.enabled = false;
+                });
+                isMicOn = false;
+                console.log('🔇 麥克風預設關閉，按「開始錄音」才會開啟');
 
                 // 建立 PeerJS 連接（使用公共伺服器）
                 const peerId = `${MEETING_ID}-${currentUser.id.substring(0, 8)}`;
@@ -991,18 +998,37 @@
             if (!isRecording) {
                 const speakerOK = await initSpeakerDetection();
                 if (speakerOK) {
-                    // 使用 Deepgram 語音辨識
+                    // 使用 AssemblyAI 語音辨識
                     const deepgramOK = await startDeepgramStream();
                     if (deepgramOK) {
                         isRecording = true;
                         document.getElementById('startBtn').textContent = '停止錄音';
                         document.getElementById('startBtn').classList.remove('btn-primary');
                         document.getElementById('startBtn').classList.add('btn-danger');
-                        console.log('🎤 開始錄音 (Deepgram)');
+
+                        // ✅ 開啟麥克風（PeerJS 語音通話）
+                        if (localStream) {
+                            localStream.getAudioTracks().forEach(track => {
+                                track.enabled = true;
+                            });
+                            isMicOn = true;
+                            console.log('🎙️ 麥克風已開啟');
+                        }
+
+                        console.log('🎤 開始錄音 (AssemblyAI)');
                     }
                 }
 
             } else {
+                // ❌ 關閉麥克風
+                if (localStream) {
+                    localStream.getAudioTracks().forEach(track => {
+                        track.enabled = false;
+                    });
+                    isMicOn = false;
+                    console.log('🔇 麥克風已關閉');
+                }
+
                 stopDeepgramStream();
                 stopRecording();
                 console.log('⏸️ 停止錄音');
