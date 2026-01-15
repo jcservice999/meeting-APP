@@ -27,8 +27,7 @@
                     <option value="zh-TW">中文</option>
                     <option value="en-US">English</option>
                 </select>
-                <button id="micBtn" class="btn-secondary" title="麥克風">🎙️</button>
-                <button id="speakerBtn" class="btn-secondary" title="嗇叭">🔊</button>
+                <button id="speakerBtn" class="btn-secondary" title="喇叭">🔊</button>
                 <button id="startBtn" class="btn-primary">開始錄音</button>
                 <button id="leaveBtn" class="btn-danger">離開會議</button>
             </div>
@@ -410,11 +409,11 @@
                     if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
-                }, 6000);
+                }, 3000);  // 改為 3 秒，加快字幕速度
             }
 
             recordChunk();
-            recordingInterval = setInterval(recordChunk, 7000);
+            recordingInterval = setInterval(recordChunk, 4000);  // 改為 4 秒循環
         }
 
         // VAD 設定
@@ -1161,27 +1160,12 @@
         }
 
         function updateVoiceButtons() {
-            const micBtn = document.getElementById('micBtn');
             const speakerBtn = document.getElementById('speakerBtn');
-
-            micBtn.textContent = isMicOn ? '🎙️' : '🔇';
-            micBtn.style.opacity = isMicOn ? '1' : '0.5';
-
-            speakerBtn.textContent = isSpeakerOn ? '🔊' : '🔈';
-            speakerBtn.style.opacity = isSpeakerOn ? '1' : '0.5';
-        }
-
-        // 麥克風開關
-        document.getElementById('micBtn').addEventListener('click', () => {
-            if (!localStream) {
-                alert('語音通話尚未連接');
-                return;
+            if (speakerBtn) {
+                speakerBtn.textContent = isSpeakerOn ? '🔊' : '🔈';
+                speakerBtn.style.opacity = isSpeakerOn ? '1' : '0.5';
             }
-            isMicOn = !isMicOn;
-            localStream.getAudioTracks().forEach(track => track.enabled = isMicOn);
-            updateVoiceButtons();
-            console.log('麥克風:', isMicOn ? '開啟' : '關閉');
-        });
+        }
 
         // 喇叭開關
         document.getElementById('speakerBtn').addEventListener('click', () => {
