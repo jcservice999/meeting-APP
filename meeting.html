@@ -383,12 +383,7 @@
                             const result = await response.json();
                             const responseTime = Date.now();
                             const elapsed = responseTime - requestTime;
-
-                            // 忽略超過 20 秒的過期結果
-                            if (elapsed > 20000) {
-                                console.log(`⏭️ 忽略過期結果 (${(elapsed / 1000).toFixed(1)}秒前的請求)`);
-                                return;
-                            }
+                            console.log(`📊 API 回應時間: ${(elapsed / 1000).toFixed(1)}秒`);
 
                             if (result.error) {
                                 console.error('❌ 辨識錯誤:', result.error);
