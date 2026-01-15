@@ -326,11 +326,11 @@
                 }
 
                 const language = document.getElementById('languageSelect').value;
-                // 選擇模型：英文用 english，其他用 multi
-                const speechModel = language === 'en-US' ? 'universal-streaming-english' : 'universal-streaming-multi';
+                console.log('選擇語言:', language);
 
-                // 建立 WebSocket 連接（新的 v3 Universal Streaming API）
-                const wsUrl = `wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&token=${tokenData.token}&speech_model=${speechModel}&format_turns=true`;
+                // 建立 WebSocket 連接（v3 Universal Streaming API - 使用最基本參數）
+                const wsUrl = `wss://streaming.assemblyai.com/v3/ws?sample_rate=16000&token=${tokenData.token}`;
+                console.log('WebSocket URL:', wsUrl.substring(0, 60) + '...');
                 assemblySocket = new WebSocket(wsUrl);
 
                 assemblySocket.onopen = () => {
