@@ -28,7 +28,6 @@
                     <option value="en-US">English</option>
                 </select>
                 <button id="speakerBtn" class="btn-secondary" title="喇叭">🔊</button>
-                <button id="promptBtn" class="btn-secondary" title="設定提示詞">⚙️</button>
                 <button id="startBtn" class="btn-primary">開始錄音</button>
                 <button id="leaveBtn" class="btn-danger">離開會議</button>
             </div>
@@ -277,11 +276,8 @@
 
 
 
-        // Whisper API 語音轉錄設定
-        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/whisper-speech';
-
-        // 自訂提示詞（可改善辨識準確度）
-        let whisperPrompt = localStorage.getItem('whisperPrompt') || 'This is a meeting conversation. Transcribe the spoken words accurately.';
+        // AssemblyAI API 語音轉錄設定
+        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
 
         let mediaRecorder = null;
         let audioStream = null;
@@ -384,7 +380,7 @@
                                 body: JSON.stringify({
                                     audio: base64Audio,
                                     language: language,
-                                    prompt: whisperPrompt
+                                    roomId: MEETING_ID
                                 })
                             });
 
