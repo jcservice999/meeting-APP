@@ -335,12 +335,12 @@
         let audioChunks = [];
 
         // VAD 連續錄音設定（智慧斷句版）
-        const SILENCE_THRESHOLD = 3;      // 靜音閾值（越低越敏感）
-        const SILENCE_DURATION = 1500;    // 靜音 1.5 秒後切割（一般講話停頓）
+        const SILENCE_THRESHOLD = 10;     // 靜音閾值（調高，更容易偵測靜音）
+        const SILENCE_DURATION = 1200;    // 靜音 1.2 秒後切割
         const MIN_AUDIO_DURATION = 1500;  // 最短 1.5 秒
-        const MAX_AUDIO_DURATION = 30000; // 最長 30 秒（減少強制切割）
-        const MAX_CONCURRENT_REQUESTS = 1; // 1 個請求
-        const MIN_AUDIO_SIZE = 10000;     // 最小音訊大小 10KB
+        const MAX_AUDIO_DURATION = 30000; // 最長 30 秒
+        const MAX_CONCURRENT_REQUESTS = 1;
+        const MIN_AUDIO_SIZE = 10000;
 
         let vadContext = null;
         let vadAnalyser = null;
@@ -407,6 +407,11 @@
                 const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
                 vadAnalyser.getByteFrequencyData(dataArray);
                 currentVolume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+
+                // 每 5 秒輸出一次音量（除錯用）
+                if (recordingStart && (Date.now() - recordingStart) % 5000 < 100) {
+                    console.log(`🔊 音量: ${currentVolume.toFixed(1)}, 閾值: ${SILENCE_THRESHOLD}`);
+                }
 
                 checkSilenceAndProcess();
             }, 100);
