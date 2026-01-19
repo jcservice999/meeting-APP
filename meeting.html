@@ -327,13 +327,25 @@
 
         let mediaRecorder = null;
         let audioStream = null;
-        let recordingInterval = null;
         let audioChunks = [];
+
+        // VAD 連續錄音設定
+        const SILENCE_THRESHOLD = 5;      // 靜音閾值 (0-255)
+        const SILENCE_DURATION = 1500;    // 靜音持續多久後切割 (ms)
+        const MIN_AUDIO_DURATION = 1000;  // 最短音訊長度 (ms)
+        const MAX_AUDIO_DURATION = 15000; // 最長音訊長度 (ms)，超過強制切割
+
+        let vadContext = null;
+        let vadAnalyser = null;
+        let vadInterval = null;
+        let silenceStart = null;          // 開始靜音的時間
+        let recordingStart = null;        // 開始錄音的時間
+        let currentVolume = 0;
+        let isProcessing = false;         // 是否正在處理上一段
 
         // 開始本地 Whisper 錄音
         async function startDeepgramStream() {
             try {
-                // 取得麥克風權限
                 audioStream = await navigator.mediaDevices.getUserMedia({
                     audio: {
                         echoCancellation: true,
@@ -342,18 +354,21 @@
                     }
                 });
 
-                console.log('✅ 本地 Whisper 語音轉錄已啟動');
+                console.log('✅ 本地 Whisper 連續錄音已啟動');
                 showInterimCaption('正在聆聽...');
 
-                // 開始錄音循環
-                startRecordingLoop();
+                // 初始化 VAD
+                initVAD(audioStream);
+
+                // 開始連續錄音
+                startContinuousRecording();
 
                 return true;
 
             } catch (error) {
                 console.error('語音辨識初始化失敗:', error);
                 if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-                    alert('無法連接本地 Whisper 伺服器，請確認伺服器已啟動 (python server.py)');
+                    alert('無法連接本地 Whisper 伺服器，請確認伺服器已啟動');
                 } else {
                     alert('語音辨識初始化失敗：' + error.message);
                 }
@@ -361,160 +376,179 @@
             }
         }
 
-        // 錄音循環 - 每 6 秒處理一次
-        function startRecordingLoop() {
-            const language = document.getElementById('languageSelect').value;
-
-            // 啟動 VAD 監測
-            if (audioStream) {
-                startVADMonitoring(audioStream);
-            }
-
-            function recordChunk() {
-                console.log('🎙️ 開始錄製音訊片段...');
-                if (!audioStream) {
-                    console.error('❌ 沒有音訊串流！');
-                    return;
-                }
-
-                // 重置這一輪的最大音量
-                vadMaxVolume = 0;
-
-                audioChunks = [];
-                mediaRecorder = new MediaRecorder(audioStream, {
-                    mimeType: 'audio/webm;codecs=opus'
-                });
-
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                    }
-                };
-
-                mediaRecorder.onstop = async () => {
-                    if (audioChunks.length === 0) return;
-
-                    // VAD 檢查
-                    const maxVol = vadMaxVolume;
-                    console.log(`🔊 音量: ${maxVol.toFixed(1)} (閾值: ${VAD_THRESHOLD})`);
-
-                    if (maxVol < VAD_THRESHOLD) {
-                        console.log('⏭️ 音量過低，跳過');
-                        showInterimCaption('正在聆聽...');
-                        return;
-                    }
-
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    const reader = new FileReader();
-                    reader.onloadend = async () => {
-                        const base64Audio = reader.result.split(',')[1];
-
-                        try {
-                            const { data: { session } } = await supabaseClient.auth.getSession();
-                            if (!session) return;
-
-                            console.log('📤 傳送音訊到本地 Whisper...');
-                            const requestTime = Date.now();
-
-                            const response = await fetch(SPEECH_API_URL, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json'
-                                },
-                                body: JSON.stringify({
-                                    audio: base64Audio,
-                                    language: language,
-                                    prompt: '這是商業會議的錄音。'  // 可自訂提示詞
-                                })
-                            });
-
-                            const result = await response.json();
-                            const responseTime = Date.now();
-                            const elapsed = responseTime - requestTime;
-                            console.log(`📊 API 回應時間: ${(elapsed / 1000).toFixed(1)}秒`);
-
-                            if (result.error) {
-                                console.error('❌ 辨識錯誤:', result.error);
-                                if (result.error.includes('模型') || result.error.includes('伺服器')) {
-                                    stopDeepgramStream();
-                                    alert('Whisper 伺服器錯誤：' + result.error);
-                                }
-                                return;
-                            }
-
-                            if (result.transcript && result.transcript.trim()) {
-                                console.log(`✅ 辨識結果 (${(elapsed / 1000).toFixed(1)}秒):`, result.transcript);
-                                showLocalCaption(result.transcript);
-                                saveCaption(result.transcript);
-                            }
-
-                        } catch (error) {
-                            console.error('❌ 傳送失敗:', error);
-                        }
-                    };
-                    reader.readAsDataURL(audioBlob);
-                };
-
-                mediaRecorder.start();
-                setTimeout(() => {
-                    if (mediaRecorder && mediaRecorder.state === 'recording') {
-                        mediaRecorder.stop();
-                    }
-                }, 5000);  // 5 秒錄音，確保辨識品質
-            }
-
-            recordChunk();
-            recordingInterval = setInterval(recordChunk, 6000);  // 6 秒循環
-        }
-
-        // VAD 設定
-        const VAD_THRESHOLD = 8;  // 降低閾值讓更多音訊通過 (0-255)
-        let vadMaxVolume = 0;      // 錄音期間的最大音量
-        let vadAnalyser = null;    // VAD 專用的分析器
-        let vadInterval = null;    // VAD 檢測定時器
-
-        // 開始 VAD 監測
-        function startVADMonitoring(stream) {
-            const vadContext = new (window.AudioContext || window.webkitAudioContext)();
+        // 初始化 VAD
+        function initVAD(stream) {
+            vadContext = new (window.AudioContext || window.webkitAudioContext)();
             vadAnalyser = vadContext.createAnalyser();
             vadAnalyser.fftSize = 256;
-            vadAnalyser.smoothingTimeConstant = 0.3;
+            vadAnalyser.smoothingTimeConstant = 0.5;
 
             const source = vadContext.createMediaStreamSource(stream);
             source.connect(vadAnalyser);
 
-            // 每 100ms 檢測一次音量
+            // 持續監測音量
             vadInterval = setInterval(() => {
                 if (!vadAnalyser) return;
                 const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
                 vadAnalyser.getByteFrequencyData(dataArray);
-                const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
-                if (avg > vadMaxVolume) {
-                    vadMaxVolume = avg;
-                }
+                currentVolume = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
+
+                checkSilenceAndProcess();
             }, 100);
 
-            console.log('✅ VAD 監測已啟動');
+            console.log('✅ VAD 連續監測已啟動');
         }
 
-        // 停止 VAD 監測
-        function stopVADMonitoring() {
-            if (vadInterval) {
-                clearInterval(vadInterval);
-                vadInterval = null;
+        // 開始連續錄音
+        function startContinuousRecording() {
+            if (!audioStream) return;
+
+            audioChunks = [];
+            recordingStart = Date.now();
+            silenceStart = null;
+
+            mediaRecorder = new MediaRecorder(audioStream, {
+                mimeType: 'audio/webm;codecs=opus'
+            });
+
+            mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    audioChunks.push(event.data);
+                }
+            };
+
+            mediaRecorder.onstop = () => {
+                // 錄音停止時處理
+                if (audioChunks.length > 0 && !isProcessing) {
+                    processAudioChunks();
+                }
+            };
+
+            // 每 500ms 收集一次資料
+            mediaRecorder.start(500);
+            console.log('🎙️ 連續錄音開始');
+        }
+
+        // 檢查靜音並決定是否處理
+        function checkSilenceAndProcess() {
+            if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+            if (isProcessing) return;
+
+            const now = Date.now();
+            const recordingDuration = now - recordingStart;
+            const isSilent = currentVolume < SILENCE_THRESHOLD;
+
+            // 顯示即時音量
+            if (recordingDuration % 1000 < 100) {
+                console.log(`🔊 音量: ${currentVolume.toFixed(1)}`);
             }
-            vadAnalyser = null;
+
+            // 檢查是否需要切割
+            let shouldProcess = false;
+
+            if (isSilent) {
+                // 開始或持續靜音
+                if (!silenceStart) {
+                    silenceStart = now;
+                } else if (now - silenceStart >= SILENCE_DURATION && recordingDuration >= MIN_AUDIO_DURATION) {
+                    // 靜音超過閾值，且錄音夠長
+                    console.log(`🔇 偵測到靜音 ${SILENCE_DURATION}ms，切割送出`);
+                    shouldProcess = true;
+                }
+            } else {
+                // 有聲音，重置靜音計時
+                silenceStart = null;
+            }
+
+            // 強制切割：超過最長時間
+            if (recordingDuration >= MAX_AUDIO_DURATION) {
+                console.log(`⏱️ 錄音達 ${MAX_AUDIO_DURATION / 1000} 秒，強制切割`);
+                shouldProcess = true;
+            }
+
+            if (shouldProcess) {
+                // 停止當前錄音，處理後會自動開始新錄音
+                mediaRecorder.stop();
+            }
+        }
+
+        // 處理音訊片段
+        async function processAudioChunks() {
+            if (audioChunks.length === 0) {
+                startContinuousRecording();
+                return;
+            }
+
+            isProcessing = true;
+            const chunksToProcess = [...audioChunks];
+
+            // 立即開始新的錄音（不等處理完成）
+            startContinuousRecording();
+
+            const audioBlob = new Blob(chunksToProcess, { type: 'audio/webm' });
+
+            // 太小的音訊跳過
+            if (audioBlob.size < 5000) {
+                console.log('⏭️ 音訊太短，跳過');
+                isProcessing = false;
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onloadend = async () => {
+                const base64Audio = reader.result.split(',')[1];
+                const language = document.getElementById('languageSelect').value;
+
+                try {
+                    console.log(`📤 傳送音訊 (${(audioBlob.size / 1024).toFixed(1)}KB)...`);
+                    const requestTime = Date.now();
+
+                    const response = await fetch(SPEECH_API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            audio: base64Audio,
+                            language: language
+                        })
+                    });
+
+                    const result = await response.json();
+                    const elapsed = Date.now() - requestTime;
+                    console.log(`📊 回應時間: ${(elapsed / 1000).toFixed(1)}秒`);
+
+                    if (result.error) {
+                        console.error('❌ 辨識錯誤:', result.error);
+                    } else if (result.transcript && result.transcript.trim()) {
+                        console.log(`✅ 辨識結果:`, result.transcript);
+                        showLocalCaption(result.transcript);
+                        saveCaption(result.transcript);
+                    } else {
+                        console.log('📝 無內容');
+                    }
+
+                } catch (error) {
+                    console.error('❌ 傳送失敗:', error);
+                }
+
+                isProcessing = false;
+            };
+            reader.readAsDataURL(audioBlob);
         }
 
         // 停止錄音
         function stopDeepgramStream() {
-            // 停止 VAD 監測
-            stopVADMonitoring();
-
-            if (recordingInterval) {
-                clearInterval(recordingInterval);
-                recordingInterval = null;
+            // 停止 VAD
+            if (vadInterval) {
+                clearInterval(vadInterval);
+                vadInterval = null;
             }
+            if (vadContext) {
+                vadContext.close();
+                vadContext = null;
+            }
+            vadAnalyser = null;
+
+            // 停止錄音
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
                 mediaRecorder.stop();
             }
@@ -522,6 +556,8 @@
                 audioStream.getTracks().forEach(track => track.stop());
                 audioStream = null;
             }
+
+            isProcessing = false;
             console.log('⏹️ Whisper 已停止');
         }
 
