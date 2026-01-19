@@ -254,6 +254,11 @@
                     table: 'captions',
                     filter: `meeting_id=eq.${MEETING_ID}`
                 }, (payload) => {
+                    // 過濾掉自己的字幕（本地已經顯示過了）
+                    if (payload.new.user_id === currentUser.id) {
+                        console.log('跳過自己的字幕');
+                        return;
+                    }
                     console.log('新字幕:', payload.new);
                     displayRemoteCaption(payload.new);
                 })
