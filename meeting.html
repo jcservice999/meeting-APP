@@ -329,12 +329,13 @@
         let audioStream = null;
         let audioChunks = [];
 
-        // VAD 連續錄音設定（優化版）
+        // VAD 連續錄音設定（穩定版）
         const SILENCE_THRESHOLD = 5;      // 靜音閾值 (0-255)
-        const SILENCE_DURATION = 1200;    // 靜音 1.2 秒後切割
-        const MIN_AUDIO_DURATION = 800;   // 最短 0.8 秒
-        const MAX_AUDIO_DURATION = 8000;  // 最長 8 秒（縮短，處理更快）
-        const MAX_CONCURRENT_REQUESTS = 3; // 最大並行請求數
+        const SILENCE_DURATION = 1500;    // 靜音 1.5 秒後切割
+        const MIN_AUDIO_DURATION = 2000;  // 最短 2 秒（避免太短）
+        const MAX_AUDIO_DURATION = 10000; // 最長 10 秒
+        const MAX_CONCURRENT_REQUESTS = 1; // 改回 1 個（避免伺服器過載）
+        const MIN_AUDIO_SIZE = 15000;     // 最小音訊大小 15KB
 
         let vadContext = null;
         let vadAnalyser = null;
@@ -476,8 +477,8 @@
         function queueAudioForProcessing(chunks) {
             const audioBlob = new Blob(chunks, { type: 'audio/webm' });
 
-            if (audioBlob.size < 5000) {
-                console.log('⏭️ 音訊太短，跳過');
+            if (audioBlob.size < MIN_AUDIO_SIZE) {
+                console.log(`⏭️ 音訊太短 (${(audioBlob.size / 1024).toFixed(1)}KB < ${MIN_AUDIO_SIZE / 1024}KB)，跳過`);
                 return;
             }
 
