@@ -329,19 +329,24 @@
         let audioStream = null;
         let audioChunks = [];
 
-        // VAD 連續錄音設定
+        // VAD 連續錄音設定（優化版）
         const SILENCE_THRESHOLD = 5;      // 靜音閾值 (0-255)
-        const SILENCE_DURATION = 1500;    // 靜音持續多久後切割 (ms)
-        const MIN_AUDIO_DURATION = 1000;  // 最短音訊長度 (ms)
-        const MAX_AUDIO_DURATION = 15000; // 最長音訊長度 (ms)，超過強制切割
+        const SILENCE_DURATION = 1200;    // 靜音 1.2 秒後切割
+        const MIN_AUDIO_DURATION = 800;   // 最短 0.8 秒
+        const MAX_AUDIO_DURATION = 8000;  // 最長 8 秒（縮短，處理更快）
+        const MAX_CONCURRENT_REQUESTS = 3; // 最大並行請求數
 
         let vadContext = null;
         let vadAnalyser = null;
         let vadInterval = null;
-        let silenceStart = null;          // 開始靜音的時間
-        let recordingStart = null;        // 開始錄音的時間
+        let silenceStart = null;
+        let recordingStart = null;
         let currentVolume = 0;
-        let isProcessing = false;         // 是否正在處理上一段
+
+        // 並行處理系統
+        let audioQueue = [];              // 音訊佇列
+        let activeRequests = 0;           // 目前進行中的請求數
+        let requestId = 0;                // 請求編號（用於排序）
 
         // 開始本地 Whisper 錄音
         async function startDeepgramStream() {
@@ -354,8 +359,13 @@
                     }
                 });
 
-                console.log('✅ 本地 Whisper 連續錄音已啟動');
+                console.log('✅ 本地 Whisper 連續錄音已啟動（併發優化版）');
                 showInterimCaption('正在聆聽...');
+
+                // 初始化
+                audioQueue = [];
+                activeRequests = 0;
+                requestId = 0;
 
                 // 初始化 VAD
                 initVAD(audioStream);
@@ -386,7 +396,6 @@
             const source = vadContext.createMediaStreamSource(stream);
             source.connect(vadAnalyser);
 
-            // 持續監測音量
             vadInterval = setInterval(() => {
                 if (!vadAnalyser) return;
                 const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
@@ -418,81 +427,81 @@
             };
 
             mediaRecorder.onstop = () => {
-                // 錄音停止時處理
-                if (audioChunks.length > 0 && !isProcessing) {
-                    processAudioChunks();
+                if (audioChunks.length > 0) {
+                    // 加入佇列（不阻塞）
+                    queueAudioForProcessing([...audioChunks]);
+                }
+                // 立即開始新錄音
+                if (audioStream) {
+                    startContinuousRecording();
                 }
             };
 
-            // 每 500ms 收集一次資料
             mediaRecorder.start(500);
-            console.log('🎙️ 連續錄音開始');
         }
 
-        // 檢查靜音並決定是否處理
+        // 檢查靜音並決定是否切割
         function checkSilenceAndProcess() {
             if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-            if (isProcessing) return;
 
             const now = Date.now();
             const recordingDuration = now - recordingStart;
             const isSilent = currentVolume < SILENCE_THRESHOLD;
 
-            // 顯示即時音量
-            if (recordingDuration % 1000 < 100) {
-                console.log(`🔊 音量: ${currentVolume.toFixed(1)}`);
-            }
-
-            // 檢查是否需要切割
-            let shouldProcess = false;
+            let shouldCut = false;
 
             if (isSilent) {
-                // 開始或持續靜音
                 if (!silenceStart) {
                     silenceStart = now;
                 } else if (now - silenceStart >= SILENCE_DURATION && recordingDuration >= MIN_AUDIO_DURATION) {
-                    // 靜音超過閾值，且錄音夠長
-                    console.log(`🔇 偵測到靜音 ${SILENCE_DURATION}ms，切割送出`);
-                    shouldProcess = true;
+                    console.log(`🔇 靜音切割 (${(recordingDuration / 1000).toFixed(1)}秒)`);
+                    shouldCut = true;
                 }
             } else {
-                // 有聲音，重置靜音計時
                 silenceStart = null;
             }
 
-            // 強制切割：超過最長時間
+            // 強制切割
             if (recordingDuration >= MAX_AUDIO_DURATION) {
-                console.log(`⏱️ 錄音達 ${MAX_AUDIO_DURATION / 1000} 秒，強制切割`);
-                shouldProcess = true;
+                console.log(`⏱️ 時間切割 (${MAX_AUDIO_DURATION / 1000}秒)`);
+                shouldCut = true;
             }
 
-            if (shouldProcess) {
-                // 停止當前錄音，處理後會自動開始新錄音
+            if (shouldCut) {
                 mediaRecorder.stop();
             }
         }
 
-        // 處理音訊片段
-        async function processAudioChunks() {
-            if (audioChunks.length === 0) {
-                startContinuousRecording();
-                return;
-            }
+        // 加入佇列處理
+        function queueAudioForProcessing(chunks) {
+            const audioBlob = new Blob(chunks, { type: 'audio/webm' });
 
-            isProcessing = true;
-            const chunksToProcess = [...audioChunks];
-
-            // 立即開始新的錄音（不等處理完成）
-            startContinuousRecording();
-
-            const audioBlob = new Blob(chunksToProcess, { type: 'audio/webm' });
-
-            // 太小的音訊跳過
             if (audioBlob.size < 5000) {
                 console.log('⏭️ 音訊太短，跳過');
-                isProcessing = false;
                 return;
             }
+
+            const id = ++requestId;
+            audioQueue.push({ id, blob: audioBlob, timestamp: Date.now() });
+            console.log(`📥 加入佇列 #${id} (${(audioBlob.size / 1024).toFixed(1)}KB), 佇列長度: ${audioQueue.length}`);
+
+            // 嘗試處理佇列
+            processQueue();
+        }
+
+        // 處理佇列（並行）
+        function processQueue() {
+            // 如果已達最大並行數或佇列為空，返回
+            while (activeRequests < MAX_CONCURRENT_REQUESTS && audioQueue.length > 0) {
+                const item = audioQueue.shift();
+                processAudioItem(item);
+            }
+        }
+
+        // 處理單個音訊項目
+        async function processAudioItem(item) {
+            activeRequests++;
+            console.log(`🔄 處理 #${item.id}, 並行數: ${activeRequests}`);
 
             const reader = new FileReader();
             reader.onloadend = async () => {
@@ -500,9 +509,6 @@
                 const language = document.getElementById('languageSelect').value;
 
                 try {
-                    console.log(`📤 傳送音訊 (${(audioBlob.size / 1024).toFixed(1)}KB)...`);
-                    const requestTime = Date.now();
-
                     const response = await fetch(SPEECH_API_URL, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -513,26 +519,29 @@
                     });
 
                     const result = await response.json();
-                    const elapsed = Date.now() - requestTime;
-                    console.log(`📊 回應時間: ${(elapsed / 1000).toFixed(1)}秒`);
+                    const elapsed = Date.now() - item.timestamp;
 
                     if (result.error) {
-                        console.error('❌ 辨識錯誤:', result.error);
+                        console.error(`❌ #${item.id} 錯誤:`, result.error);
                     } else if (result.transcript && result.transcript.trim()) {
-                        console.log(`✅ 辨識結果:`, result.transcript);
+                        console.log(`✅ #${item.id} (${(elapsed / 1000).toFixed(1)}秒):`, result.transcript);
                         showLocalCaption(result.transcript);
                         saveCaption(result.transcript);
                     } else {
-                        console.log('📝 無內容');
+                        console.log(`📝 #${item.id} 無內容`);
                     }
 
                 } catch (error) {
-                    console.error('❌ 傳送失敗:', error);
+                    console.error(`❌ #${item.id} 傳送失敗:`, error);
                 }
 
-                isProcessing = false;
+                activeRequests--;
+                console.log(`✓ #${item.id} 完成, 並行數: ${activeRequests}, 佇列: ${audioQueue.length}`);
+
+                // 繼續處理佇列
+                processQueue();
             };
-            reader.readAsDataURL(audioBlob);
+            reader.readAsDataURL(item.blob);
         }
 
         // 停止錄音
@@ -557,7 +566,9 @@
                 audioStream = null;
             }
 
-            isProcessing = false;
+            // 清空佇列
+            audioQueue = [];
+            activeRequests = 0;
             console.log('⏹️ Whisper 已停止');
         }
 
