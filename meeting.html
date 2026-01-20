@@ -322,226 +322,100 @@
 
 
 
-        // AssemblyAI API 語音轉錄設定
-        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
+        // AssemblyAI Streaming 設定
+        const TOKEN_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-token';
 
-        let mediaRecorder = null;
-        let audioStream = null;
-        let recordingInterval = null;
-        let audioChunks = [];
+        let socket = null;
+        let processor = null;
+        // audioStream, audioContext 已在外部定義
 
-        // 開始 AssemblyAI Batch 錄音
-        async function startAssemblyAIBatch() {
+        // 開始 AssemblyAI Streaming
+        async function startAssemblyAIStreaming() {
             try {
-                // 取得麥克風權限
-                audioStream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        sampleRate: 48000
-                    }
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (!session) throw new Error("未登入");
+
+                // 1. 取得臨時 Token
+                const tokenResponse = await fetch(TOKEN_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${session.access_token}`
+                    },
+                    body: JSON.stringify({ roomId: MEETING_ID })
                 });
 
-                console.log('✅ AssemblyAI Batch 語音轉錄已啟動');
-                showInterimCaption('正在聆聽...');
+                const tokenData = await tokenResponse.json();
+                if (!tokenData.success) throw new Error(tokenData.error || "無法取得 Token");
 
-                // 開始錄音循環
-                startRecordingLoop();
+                // 2. 建立 WebSocket
+                const language = document.getElementById('languageSelect').value;
+                const sampleRate = 16000;
+                const url = `wss://streaming.assemblyai.com/v3/realtime?sample_rate=${sampleRate}&token=${tokenData.token}`;
+
+                socket = new WebSocket(url);
+
+                socket.onopen = async () => {
+                    console.log('✅ AssemblyAI WebSocket 已連接');
+                    await startAudioCapture(sampleRate);
+                    showInterimCaption('正在聆聽 (即時串流)...');
+                };
+
+                socket.onmessage = (message) => {
+                    const data = JSON.parse(message.data);
+                    if (data.message_type === 'PartialTranscript' && data.text) {
+                        showInterimCaption(data.text);
+                    } else if (data.message_type === 'FinalTranscript' && data.text) {
+                        console.log('✅ 即時辨識結果:', data.text);
+                        showLocalCaption(data.text);
+                        saveCaption(data.text);
+                    }
+                };
+
+                socket.onclose = () => {
+                    console.log('⏹️ WebSocket 已關閉');
+                    stopAssemblyAIStreaming();
+                };
 
                 return true;
-
             } catch (error) {
-                console.error('語音辨識初始化失敗:', error);
-                if (error.message.includes('No active')) {
-                    alert('請先在「AssemblyAI API 設定」中新增 API Key');
-                    window.location.href = 'settings.html';
-                } else {
-                    alert('語音辨識初始化失敗：' + error.message);
-                }
+                console.error('❌ 啟動串流失敗:', error);
+                alert('啟動即時轉錄失敗: ' + error.message);
                 return false;
             }
         }
 
-        // 錄音循環 - 每 6 秒處理一次
-        function startRecordingLoop() {
-            const language = document.getElementById('languageSelect').value;
+        async function startAudioCapture(sampleRate) {
+            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+            const source = audioContext.createMediaStreamSource(audioStream);
+            processor = audioContext.createScriptProcessor(4096, 1, 1);
 
-            // 啟動 VAD 監測
-            if (audioStream) {
-                startVADMonitoring(audioStream);
-            }
+            source.connect(processor);
+            processor.connect(audioContext.destination);
 
-            function recordChunk() {
-                console.log('🎙️ 開始錄製音訊片段...');
-                if (!audioStream) {
-                    console.error('❌ 沒有音訊串流！');
-                    return;
+            processor.onaudioprocess = (e) => {
+                if (!socket || socket.readyState !== WebSocket.OPEN) return;
+                const inputData = e.inputBuffer.getChannelData(0);
+                const pcmData = new Int16Array(inputData.length);
+                for (let i = 0; i < inputData.length; i++) {
+                    const s = Math.max(-1, Math.min(1, inputData[i]));
+                    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
-
-                // 重置這一輪的最大音量
-                vadMaxVolume = 0;
-
-                audioChunks = [];
-                mediaRecorder = new MediaRecorder(audioStream, {
-                    mimeType: 'audio/webm;codecs=opus'
-                });
-
-                mediaRecorder.ondataavailable = (event) => {
-                    if (event.data.size > 0) {
-                        audioChunks.push(event.data);
-                    }
-                };
-
-                mediaRecorder.onstop = async () => {
-                    if (audioChunks.length === 0) return;
-
-                    // VAD 檢查
-                    const maxVol = vadMaxVolume;
-                    console.log(`🔊 音量: ${maxVol.toFixed(1)} (閾值: ${VAD_THRESHOLD})`);
-
-                    if (maxVol < VAD_THRESHOLD) {
-                        console.log('⏭️ 音量過低，跳過');
-                        showInterimCaption('正在聆聽...');
-                        return;
-                    }
-
-                    console.log(`🎵 建立 Blob，chunks 數量: ${audioChunks.length}`);
-                    const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    console.log(`🎵 Blob 大小: ${audioBlob.size} bytes`);
-
-                    if (audioBlob.size < 1000) {
-                        console.log('⏭️ Blob 太小，跳過');
-                        return;
-                    }
-
-                    const reader = new FileReader();
-                    reader.onerror = (err) => {
-                        console.error('❌ FileReader 錯誤:', err);
-                    };
-                    reader.onloadend = async () => {
-                        console.log('📦 FileReader 完成，準備發送...');
-                        const base64Audio = reader.result.split(',')[1];
-                        console.log(`📦 Base64 長度: ${base64Audio?.length || 0}`);
-
-                        try {
-                            const { data: { session } } = await supabaseClient.auth.getSession();
-                            if (!session) return;
-
-                            console.log('📤 傳送音訊到 AssemblyAI...');
-                            const requestTime = Date.now();
-
-                            const response = await fetch(SPEECH_API_URL, {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${session.access_token}`
-                                },
-                                body: JSON.stringify({
-                                    audio: base64Audio,
-                                    language: language,
-                                    roomId: MEETING_ID
-                                })
-                            });
-
-                            const result = await response.json();
-                            const responseTime = Date.now();
-                            const elapsed = responseTime - requestTime;
-                            console.log(`📊 API 回應時間: ${(elapsed / 1000).toFixed(1)}秒`);
-
-                            if (result.error) {
-                                console.error('❌ 辨識錯誤:', result.error);
-                                if (result.error.includes('No active') || result.error.includes('exhausted')) {
-                                    stopAssemblyAIBatch();
-                                    alert('API Key 已用盡或無效');
-                                    window.location.href = 'settings.html';
-                                }
-                                return;
-                            }
-
-                            if (result.transcript && result.transcript.trim()) {
-                                console.log(`✅ 辨識結果 (${(elapsed / 1000).toFixed(1)}秒):`, result.transcript);
-                                showLocalCaption(result.transcript);
-                                saveCaption(result.transcript);
-                            }
-
-                        } catch (error) {
-                            console.error('❌ 傳送失敗:', error);
-                        }
-                    };
-                    reader.readAsDataURL(audioBlob);
-                };
-
-                mediaRecorder.start();
-                setTimeout(() => {
-                    if (mediaRecorder && mediaRecorder.state === 'recording') {
-                        mediaRecorder.stop();
-                    }
-                }, 5000);  // 5 秒錄音，確保辨識品質
-            }
-
-            recordChunk();
-            recordingInterval = setInterval(recordChunk, 6000);  // 6 秒循環
+                socket.send(pcmData.buffer);
+            };
         }
 
-        // VAD 設定
-        const VAD_THRESHOLD = 8;  // 降低閾值讓更多音訊通過 (0-255)
-        let vadMaxVolume = 0;      // 錄音期間的最大音量
-        let vadAnalyser = null;    // VAD 專用的分析器
-        let vadInterval = null;    // VAD 檢測定時器
-
-        // 開始 VAD 監測
-        function startVADMonitoring(stream) {
-            const vadContext = new (window.AudioContext || window.webkitAudioContext)();
-            vadAnalyser = vadContext.createAnalyser();
-            vadAnalyser.fftSize = 256;
-            vadAnalyser.smoothingTimeConstant = 0.3;
-
-            const source = vadContext.createMediaStreamSource(stream);
-            source.connect(vadAnalyser);
-
-            // 每 100ms 檢測一次音量
-            vadInterval = setInterval(() => {
-                if (!vadAnalyser) return;
-                const dataArray = new Uint8Array(vadAnalyser.frequencyBinCount);
-                vadAnalyser.getByteFrequencyData(dataArray);
-                const avg = dataArray.reduce((sum, val) => sum + val, 0) / dataArray.length;
-                if (avg > vadMaxVolume) {
-                    vadMaxVolume = avg;
-                }
-            }, 100);
-
-            console.log('✅ VAD 監測已啟動');
-        }
-
-        // 停止 VAD 監測
-        function stopVADMonitoring() {
-            if (vadInterval) {
-                clearInterval(vadInterval);
-                vadInterval = null;
+        function stopAssemblyAIStreaming() {
+            if (socket) {
+                if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ terminate_session: true }));
+                socket.close();
+                socket = null;
             }
-            vadAnalyser = null;
-        }
-
-        // 停止錄音
-        function stopAssemblyAIBatch() {
-            console.log('⏹️ 正在停止 AssemblyAI...');
-            // 停止 VAD 監測
-            stopVADMonitoring();
-
-            if (recordingInterval) {
-                clearInterval(recordingInterval);
-                recordingInterval = null;
-            }
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                try {
-                    mediaRecorder.stop();
-                } catch (e) { console.warn('MediaRecorder 停止時發生警告:', e); }
-            }
-            if (audioStream) {
-                audioStream.getTracks().forEach(track => track.stop());
-                audioStream = null;
-            }
-            console.log('✅ AssemblyAI 已停止');
+            if (processor) { processor.disconnect(); processor = null; }
+            if (audioContext) { audioContext.close(); audioContext = null; }
+            if (audioStream) { audioStream.getTracks().forEach(track => track.stop()); audioStream = null; }
+            console.log('✅ AssemblyAI Streaming 已停止');
         }
 
 
@@ -1111,46 +985,37 @@
             if (!isRecording) {
                 const speakerOK = await initSpeakerDetection();
                 if (speakerOK) {
-                    // 使用 AssemblyAI 語音辨識
-                    const speechOK = await startAssemblyAIBatch();
+                    // 使用 AssemblyAI Streaming
+                    const speechOK = await startAssemblyAIStreaming();
                     if (speechOK) {
                         isRecording = true;
                         document.getElementById('startBtn').textContent = '停止錄音';
                         document.getElementById('startBtn').classList.remove('btn-primary');
                         document.getElementById('startBtn').classList.add('btn-danger');
 
-                        // ✅ 開啟麥克風（PeerJS 語音通話）
                         if (localStream) {
                             localStream.getAudioTracks().forEach(track => {
                                 track.enabled = true;
                             });
                             isMicOn = true;
-                            console.log('🎙️ 麥克風已開啟');
                         }
-
-                        console.log('🎤 開始錄音 (AssemblyAI)');
                     }
                 }
-
             } else {
-                // ❌ 關閉麥克風
                 if (localStream) {
                     localStream.getAudioTracks().forEach(track => {
                         track.enabled = false;
                     });
                     isMicOn = false;
-                    console.log('🔇 麥克風已關閉');
                 }
-
-                stopAssemblyAIBatch();
+                stopAssemblyAIStreaming();
                 stopRecording();
-                console.log('⏸️ 停止錄音');
             }
         });
 
         document.getElementById('leaveBtn').addEventListener('click', async () => {
             if (confirm('確定要離開會議嗎？')) {
-                stopAssemblyAIBatch();
+                stopAssemblyAIStreaming();
                 stopRecording();
                 await leaveMeeting();
                 // 回到房間列表，不登出
