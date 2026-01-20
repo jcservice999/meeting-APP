@@ -352,15 +352,15 @@
 
                 console.log('🎫 取得 Token 成功');
 
-                // 2. 建立 WebSocket (改用 v2 穩定版)
+                // 2. 建立 WebSocket (正式改用 v3 Universal Streaming)
                 const sampleRate = 16000;
-                const v2Url = `wss://api.assemblyai.com/v2/realtime/ws?sample_rate=${sampleRate}&token=${tokenData.token}`;
+                const v3Url = `wss://streaming.assemblyai.com/v3/ws?sample_rate=${sampleRate}&token=${tokenData.token}`;
 
-                console.log('📡 正在連接 AssemblyAI v2...');
-                socket = new WebSocket(v2Url);
+                console.log('📡 正在連接 AssemblyAI v3 Universal Streaming...');
+                socket = new WebSocket(v3Url);
 
                 socket.onopen = async () => {
-                    console.log('✅ AssemblyAI WebSocket 已連接 (v2)');
+                    console.log('✅ AssemblyAI WebSocket 已連接 (v3)');
                     await startAudioCapture(sampleRate);
                     showInterimCaption('正在聆聽 (即時串流)...');
                 };

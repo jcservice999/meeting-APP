@@ -70,24 +70,23 @@ serve(async (req) => {
 
     const apiKey = accounts[0].api_key;
 
-    // 取得臨時 streaming token (使用穩定版 v2 Real-time API)
-    const tokenRes = await fetch("https://api.assemblyai.com/v2/realtime/token", {
-      method: "POST",
+    // 取得臨時 streaming token (使用最新的 v3 Universal Streaming API)
+    // 官方目前強制定向到 v3: https://streaming.assemblyai.com/v3/token
+    const tokenRes = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=3600", {
+      method: "GET",
       headers: {
-        "Authorization": apiKey,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({ expires_in: 3600 })
+        "Authorization": apiKey
+      }
     });
 
     if (!tokenRes.ok) {
+      const err = await tokenRes.json();
       if (tokenRes.status === 402 || tokenRes.status === 429) {
         await supabase.from('speech_api_accounts')
           .update({ api_exhausted: true, exhausted_at: new Date().toISOString() })
           .eq('id', accounts[0].id);
       }
-      const errText = await tokenRes.text();
-      throw new Error(`Failed to get token: ${errText}`);
+      throw new Error(err.error || "Failed to get token");
     }
 
     const { token: streamToken } = await tokenRes.json();
