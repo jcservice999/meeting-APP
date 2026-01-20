@@ -403,21 +403,34 @@
         async function startAudioCapture(sampleRate) {
             audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
             audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
+            await audioContext.resume(); // 強制啟動 AudioContext
+
             const source = audioContext.createMediaStreamSource(audioStream);
             processor = audioContext.createScriptProcessor(4096, 1, 1);
 
             source.connect(processor);
             processor.connect(audioContext.destination);
 
+            let logCounter = 0;
             processor.onaudioprocess = (e) => {
                 if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = new Int16Array(inputData.length);
+
+                // 轉換 float32 -> int16
                 for (let i = 0; i < inputData.length; i++) {
                     const s = Math.max(-1, Math.min(1, inputData[i]));
                     pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
+
+                // 發送音訊數據
                 socket.send(pcmData.buffer);
+
+                // 每 10 次處理印一次 log 證明有在送
+                if (logCounter++ % 50 === 0) {
+                    console.log(`🎤 正在發送音訊 chunk... (Vol: ${inputData[0].toFixed(4)})`);
+                }
             };
         }
 

@@ -70,26 +70,30 @@ serve(async (req) => {
 
     const apiKey = accounts[0].api_key;
 
-    // 取得臨時 streaming token (使用最新的 v3 Universal Streaming API)
-    // 官方目前強制定向到 v3: https://streaming.assemblyai.com/v3/token
-    const tokenRes = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=3600", {
+    // 嘗試取得 v3 Token (修正 expires_in_seconds，最大不能超過 600)
+    console.log("Requesting AssemblyAI v3 Token...");
+    const tokenRes = await fetch("https://streaming.assemblyai.com/v3/token?expires_in_seconds=480", {
       method: "GET",
       headers: {
-        "Authorization": apiKey
+        "Authorization": apiKey,
+        "Content-Type": "application/json"
       }
     });
 
     if (!tokenRes.ok) {
-      const err = await tokenRes.json();
-      if (tokenRes.status === 402 || tokenRes.status === 429) {
-        await supabase.from('speech_api_accounts')
-          .update({ api_exhausted: true, exhausted_at: new Date().toISOString() })
-          .eq('id', accounts[0].id);
-      }
-      throw new Error(err.error || "Failed to get token");
+      const errText = await tokenRes.text();
+      console.error("AssemblyAI Token Error:", errText);
+      
+      // 如果 v3 失敗，回傳詳細錯誤供前端顯示
+      return new Response(JSON.stringify({ 
+        error: `AssemblyAI v3 Error: ${tokenRes.status} ${errText}` 
+      }), {
+        status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" }
+      });
     }
 
-    const { token: streamToken } = await tokenRes.json();
+    const data = await tokenRes.json();
+    const streamToken = data.token; // 確保解析正確
 
     return new Response(JSON.stringify({ 
       token: streamToken,
