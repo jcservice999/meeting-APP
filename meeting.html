@@ -401,9 +401,17 @@
         }
 
         async function startAudioCapture(sampleRate) {
-            audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            // ✅ 修正：優先重用已存在的 localStream，避免麥克風被佔用導致靜音
+            if (localStream && localStream.active) {
+                console.log('🎤 重用現有麥克風串流');
+                audioStream = localStream.clone(); // 複製一份，避免干擾這通話
+            } else {
+                console.log('🎤 請求新的麥克風權限');
+                audioStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            }
+
             audioContext = new (window.AudioContext || window.webkitAudioContext)({ sampleRate });
-            await audioContext.resume(); // 強制啟動 AudioContext
+            await audioContext.resume();
 
             const source = audioContext.createMediaStreamSource(audioStream);
             processor = audioContext.createScriptProcessor(4096, 1, 1);
@@ -418,8 +426,14 @@
                 const inputData = e.inputBuffer.getChannelData(0);
                 const pcmData = new Int16Array(inputData.length);
 
+                // 計算音量以確保有聲音
+                let sum = 0;
+
                 // 轉換 float32 -> int16
                 for (let i = 0; i < inputData.length; i++) {
+                    // 音量計算
+                    sum += inputData[i] * inputData[i];
+
                     const s = Math.max(-1, Math.min(1, inputData[i]));
                     pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
                 }
@@ -427,9 +441,15 @@
                 // 發送音訊數據
                 socket.send(pcmData.buffer);
 
-                // 每 10 次處理印一次 log 證明有在送
+                // 計算 RMS 音量
+                const rms = Math.sqrt(sum / inputData.length);
+
+                // 每 50 次 (約 2 秒) 印一次 log
                 if (logCounter++ % 50 === 0) {
-                    console.log(`🎤 正在發送音訊 chunk... (Vol: ${inputData[0].toFixed(4)})`);
+                    console.log(`🎤 發送中... 音量: ${rms.toFixed(4)}`);
+                    if (rms === 0) {
+                        console.warn('⚠️ 警告：偵測到靜音！請檢查麥克風設定');
+                    }
                 }
             };
         }
