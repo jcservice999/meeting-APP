@@ -123,7 +123,8 @@
         let recognition = null;
         let isRecording = false;
         let isSpeaking = false;
-        let audioContext = null;
+        let audioContext = null; // 統一使用同一個音訊上下文
+        let audioStream = null;  // 確保是全域變數
         let analyser = null;
         let animationId = null;
         let participants = new Map();
@@ -327,7 +328,7 @@
 
         let socket = null;
         let processor = null;
-        // audioStream, audioContext 已在外部定義
+        // audioStream 已在上方全域聲明
 
         // 開始 AssemblyAI Streaming
         async function startAssemblyAIStreaming() {
@@ -407,14 +408,27 @@
         }
 
         function stopAssemblyAIStreaming() {
+            console.log('⏹️ 停止 AssemblyAI Streaming...');
+
             if (socket) {
-                if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ terminate_session: true }));
+                if (socket.readyState === WebSocket.OPEN) {
+                    try { socket.send(JSON.stringify({ terminate_session: true })); } catch (e) { }
+                }
                 socket.close();
                 socket = null;
             }
-            if (processor) { processor.disconnect(); processor = null; }
-            if (audioContext) { audioContext.close(); audioContext = null; }
-            if (audioStream) { audioStream.getTracks().forEach(track => track.stop()); audioStream = null; }
+            if (processor) {
+                if (processor.numberOfInputs > 0) processor.disconnect();
+                processor = null;
+            }
+            if (audioContext && audioContext.state !== 'closed') {
+                audioContext.close();
+                audioContext = null;
+            }
+            if (audioStream) {
+                audioStream.getTracks().forEach(track => track.stop());
+                audioStream = null;
+            }
             console.log('✅ AssemblyAI Streaming 已停止');
         }
 
