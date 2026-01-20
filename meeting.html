@@ -331,7 +331,7 @@
         let audioChunks = [];
 
         // 開始 AssemblyAI Batch 錄音
-        async function startDeepgramStream() {
+        async function startAssemblyAIBatch() {
             try {
                 // 取得麥克風權限
                 audioStream = await navigator.mediaDevices.getUserMedia({
@@ -405,10 +405,23 @@
                         return;
                     }
 
+                    console.log(`🎵 建立 Blob，chunks 數量: ${audioChunks.length}`);
                     const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                    console.log(`🎵 Blob 大小: ${audioBlob.size} bytes`);
+
+                    if (audioBlob.size < 1000) {
+                        console.log('⏭️ Blob 太小，跳過');
+                        return;
+                    }
+
                     const reader = new FileReader();
+                    reader.onerror = (err) => {
+                        console.error('❌ FileReader 錯誤:', err);
+                    };
                     reader.onloadend = async () => {
+                        console.log('📦 FileReader 完成，準備發送...');
                         const base64Audio = reader.result.split(',')[1];
+                        console.log(`📦 Base64 長度: ${base64Audio?.length || 0}`);
 
                         try {
                             const { data: { session } } = await supabaseClient.auth.getSession();
@@ -438,7 +451,7 @@
                             if (result.error) {
                                 console.error('❌ 辨識錯誤:', result.error);
                                 if (result.error.includes('No active') || result.error.includes('exhausted')) {
-                                    stopDeepgramStream();
+                                    stopAssemblyAIBatch();
                                     alert('API Key 已用盡或無效');
                                     window.location.href = 'settings.html';
                                 }
@@ -510,7 +523,8 @@
         }
 
         // 停止錄音
-        function stopDeepgramStream() {
+        function stopAssemblyAIBatch() {
+            console.log('⏹️ 正在停止 AssemblyAI...');
             // 停止 VAD 監測
             stopVADMonitoring();
 
@@ -519,13 +533,15 @@
                 recordingInterval = null;
             }
             if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
+                try {
+                    mediaRecorder.stop();
+                } catch (e) { console.warn('MediaRecorder 停止時發生警告:', e); }
             }
             if (audioStream) {
                 audioStream.getTracks().forEach(track => track.stop());
                 audioStream = null;
             }
-            console.log('⏹️ AssemblyAI 已停止');
+            console.log('✅ AssemblyAI 已停止');
         }
 
 
@@ -1096,8 +1112,8 @@
                 const speakerOK = await initSpeakerDetection();
                 if (speakerOK) {
                     // 使用 AssemblyAI 語音辨識
-                    const deepgramOK = await startDeepgramStream();
-                    if (deepgramOK) {
+                    const speechOK = await startAssemblyAIBatch();
+                    if (speechOK) {
                         isRecording = true;
                         document.getElementById('startBtn').textContent = '停止錄音';
                         document.getElementById('startBtn').classList.remove('btn-primary');
@@ -1126,7 +1142,7 @@
                     console.log('🔇 麥克風已關閉');
                 }
 
-                stopDeepgramStream();
+                stopAssemblyAIBatch();
                 stopRecording();
                 console.log('⏸️ 停止錄音');
             }
@@ -1134,7 +1150,7 @@
 
         document.getElementById('leaveBtn').addEventListener('click', async () => {
             if (confirm('確定要離開會議嗎？')) {
-                stopDeepgramStream();
+                stopAssemblyAIBatch();
                 stopRecording();
                 await leaveMeeting();
                 // 回到房間列表，不登出
