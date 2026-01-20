@@ -123,10 +123,10 @@
         let recognition = null;
         let isRecording = false;
         let isSpeaking = false;
-        let audioContext = null; // 統一使用同一個音訊上下文
-        let audioStream = null;  // 確保是全域變數
-        let analyser = null;
-        let animationId = null;
+        let audioContext = null; // 全域變數
+        let audioStream = null;  // 全域變數
+        let processor = null;    // 全域變數
+        let socket = null;       // 全域變數
         let participants = new Map();
         let participantsChannel = null;
         let captionsChannel = null;
@@ -326,9 +326,7 @@
         // AssemblyAI Streaming 設定
         const TOKEN_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-token';
 
-        let socket = null;
-        let processor = null;
-        // audioStream 已在上方全域聲明
+        // socket, processor, audioStream, audioContext 已在上方全域聲明
 
         // 開始 AssemblyAI Streaming
         async function startAssemblyAIStreaming() {
@@ -348,6 +346,7 @@
 
                 const tokenData = await tokenResponse.json();
                 if (!tokenData.success) throw new Error(tokenData.error || "無法取得 Token");
+                console.log('🎫 取得 Token 成功 (前8位):', tokenData.token.substring(0, 8));
 
                 // 2. 建立 WebSocket
                 const language = document.getElementById('languageSelect').value;
@@ -357,7 +356,7 @@
                 socket = new WebSocket(url);
 
                 socket.onopen = async () => {
-                    console.log('✅ AssemblyAI WebSocket 已連接');
+                    console.log('✅ AssemblyAI WebSocket 已連接 (v3)');
                     await startAudioCapture(sampleRate);
                     showInterimCaption('正在聆聽 (即時串流)...');
                 };
@@ -370,11 +369,20 @@
                         console.log('✅ 即時辨識結果:', data.text);
                         showLocalCaption(data.text);
                         saveCaption(data.text);
+                    } else if (data.message_type === 'SessionBegins') {
+                        console.log('🚀 Session ID:', data.session_id);
                     }
                 };
 
-                socket.onclose = () => {
-                    console.log('⏹️ WebSocket 已關閉');
+                socket.onerror = (error) => {
+                    console.error('❌ WebSocket 連接異常:', error);
+                };
+
+                socket.onclose = (event) => {
+                    console.log('⏹️ WebSocket 已關閉', event.code, event.reason);
+                    if (event.code !== 1000 && isRecording) {
+                        console.warn('⚠️ WebSocket 非正常關閉，請檢查 API Key 或權限');
+                    }
                     stopAssemblyAIStreaming();
                 };
 
