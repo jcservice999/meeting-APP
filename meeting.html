@@ -966,9 +966,51 @@
             captionFull.scrollTop = captionFull.scrollHeight;
         }
 
+        // 使用 AI 添加標點符號和修正錯別字
+        const PUNCTUATION_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/rapid-action';
+
+        async function addPunctuation(text) {
+            try {
+                // 使用 rapid-action Edge Function（它會用 Supabase Secrets 中的 OPENROUTER_API_KEY）
+                const response = await fetch(PUNCTUATION_API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                    },
+                    body: JSON.stringify({
+                        action: 'punctuate',
+                        text: text
+                    })
+                });
+
+                if (!response.ok) {
+                    console.warn('AI 處理失敗，使用原文');
+                    return text;
+                }
+
+                const data = await response.json();
+                return data.result || data.summary || text;
+            } catch (error) {
+                console.warn('AI 處理錯誤:', error);
+                return text;
+            }
+        }
+
         // 儲存字幕到資料庫（背景執行，不阻塞）
         async function saveCaption(text) {
             try {
+                // 使用 AI 加標點和修正錯別字
+                let finalText = text;
+                try {
+                    finalText = await addPunctuation(text);
+                    if (finalText !== text) {
+                        console.log('📝 AI 處理後:', finalText);
+                    }
+                } catch (e) {
+                    console.warn('AI 處理跳過');
+                }
+
                 // 非同步儲存，不等待結果
                 supabaseClient
                     .from('captions')
@@ -976,7 +1018,7 @@
                         meeting_id: MEETING_ID,
                         user_id: currentUser.id,
                         user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
-                        text: text,
+                        text: finalText,
                         language: document.getElementById('languageSelect').value
                     })
                     .then(({ error }) => {
