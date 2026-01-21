@@ -498,8 +498,11 @@
                     } else if (result.transcript && result.transcript.trim()) {
                         // 輪詢模式
                         console.log('✅ 辨識:', result.transcript);
-                        showLocalCaption(result.transcript);
-                        saveCaption(result.transcript);
+
+                        // 先用 AI 處理標點，再顯示和儲存
+                        const processedText = await addPunctuation(result.transcript);
+                        showLocalCaption(processedText);
+                        saveCaption(processedText, true); // true = 已處理過，不需再處理
                     } else {
                         console.log('⚠️ 無辨識結果（可能是靜音或超時）');
                     }
@@ -990,11 +993,13 @@
                 });
 
                 if (!response.ok) {
-                    console.warn('AI 處理失敗，使用原文');
+                    const errorText = await response.text();
+                    console.error('🔴 AI 處理失敗:', response.status, errorText);
                     return text;
                 }
 
                 const data = await response.json();
+                console.log('✅ AI 處理成功:', data.text || data.summary);
                 return data.text || data.summary || text;
             } catch (error) {
                 console.warn('AI 處理錯誤:', error);
@@ -1003,17 +1008,20 @@
         }
 
         // 儲存字幕到資料庫（背景執行，不阻塞）
-        async function saveCaption(text) {
+        async function saveCaption(text, alreadyProcessed = false) {
             try {
-                // 使用 AI 加標點和修正錯別字
                 let finalText = text;
-                try {
-                    finalText = await addPunctuation(text);
-                    if (finalText !== text) {
-                        console.log('📝 AI 處理後:', finalText);
+
+                // 如果尚未處理過，才呼叫 AI 加標點
+                if (!alreadyProcessed) {
+                    try {
+                        finalText = await addPunctuation(text);
+                        if (finalText !== text) {
+                            console.log('📝 AI 處理後:', finalText);
+                        }
+                    } catch (e) {
+                        console.warn('AI 處理跳過');
                     }
-                } catch (e) {
-                    console.warn('AI 處理跳過');
                 }
 
                 // 非同步儲存，不等待結果
