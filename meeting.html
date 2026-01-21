@@ -255,19 +255,23 @@
 
         // 訂閱字幕
         function subscribeToCaptions() {
+            console.log('🔔 設定字幕訂閱，會議室:', MEETING_ID);
             captionsChannel = supabaseClient
                 .channel('captions-changes')
                 .on('postgres_changes', {
                     event: 'INSERT',
                     schema: 'public',
-                    table: 'captions',
-                    filter: `meeting_id=eq.${MEETING_ID}`
+                    table: 'captions'
                 }, (payload) => {
-                    console.log('新字幕:', payload.new);
-                    // Webhook 模式：所有字幕都透過 Realtime 接收，不需要過濾自己
-                    displayRemoteCaption(payload.new);
+                    console.log('📝 收到字幕事件:', payload.new);
+                    // 只顯示當前會議室的字幕
+                    if (payload.new.meeting_id === MEETING_ID) {
+                        displayRemoteCaption(payload.new);
+                    }
                 })
-                .subscribe();
+                .subscribe((status) => {
+                    console.log('🔌 字幕訂閱狀態:', status);
+                });
         }
 
         // 載入參與者列表
