@@ -974,15 +974,10 @@
             captionFull.scrollTop = captionFull.scrollHeight;
         }
 
-        // AI 標點功能暫時關閉（避免 API 限制問題）
-        // 如要重新啟用，取消下方註解並註解掉 return text;
-        async function addPunctuation(text) {
-            // 暫時關閉 AI 標點，直接使用原文
-            return text;
+        // 使用 OpenRouter AI 添加標點符號和修正錯別字
+        const PUNCTUATION_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/rapid-action';
 
-            /*
-            // 使用 gemini-punctuation Edge Function
-            const PUNCTUATION_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/gemini-punctuation';
+        async function addPunctuation(text) {
             try {
                 const response = await fetch(PUNCTUATION_API_URL, {
                     method: 'POST',
@@ -990,19 +985,23 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                     },
-                    body: JSON.stringify({ text })
+                    body: JSON.stringify({
+                        mode: 'punctuation',
+                        conversationText: text
+                    })
                 });
 
                 if (!response.ok) {
+                    console.warn('AI 處理失敗，使用原文');
                     return text;
                 }
 
                 const data = await response.json();
-                return data.result || text;
+                return data.text || data.summary || text;
             } catch (error) {
+                console.warn('AI 處理錯誤:', error);
                 return text;
             }
-            */
         }
 
         // 儲存字幕到資料庫（背景執行，不阻塞）
