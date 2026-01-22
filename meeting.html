@@ -974,22 +974,19 @@
             captionFull.scrollTop = captionFull.scrollHeight;
         }
 
-        // 使用 AI 添加標點符號和修正錯別字
-        const PUNCTUATION_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/rapid-action';
+        // 使用 Gemini AI 添加標點符號和修正錯別字
+        const PUNCTUATION_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/gemini-punctuation';
 
         async function addPunctuation(text) {
             try {
-                // 使用 rapid-action Edge Function（它會用 Supabase Secrets 中的 OPENROUTER_API_KEY）
+                // 使用 gemini-punctuation Edge Function（Gemini API，免費額度更高）
                 const response = await fetch(PUNCTUATION_API_URL, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                     },
-                    body: JSON.stringify({
-                        mode: 'punctuation',
-                        conversationText: text
-                    })
+                    body: JSON.stringify({ text })
                 });
 
                 if (!response.ok) {
@@ -999,8 +996,8 @@
                 }
 
                 const data = await response.json();
-                console.log('✅ AI 處理成功:', data.text || data.summary);
-                return data.text || data.summary || text;
+                console.log('✅ AI 處理成功:', data.result);
+                return data.result || text;
             } catch (error) {
                 console.warn('AI 處理錯誤:', error);
                 return text;
