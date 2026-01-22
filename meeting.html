@@ -1104,7 +1104,7 @@
                     console.error('停止語音識別失敗:', e);
                 }
             }
-            if (animationId) cancelAnimationFrame(animationId);
+            if (typeof animationId !== 'undefined' && animationId) cancelAnimationFrame(animationId);
             if (audioContext) {
                 try {
                     audioContext.close();
