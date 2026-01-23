@@ -155,6 +155,103 @@
         .email-tag button:hover {
             opacity: 1;
         }
+
+        /* Word Boost 樣式 */
+        .word-boost-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.8rem;
+        }
+
+        .word-boost-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            min-height: 40px;
+            padding: 0.8rem;
+            background: rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(12px);
+            border-radius: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+
+        .word-boost-tags:empty::before {
+            content: '尚未設定任何關鍵詞';
+            color: #a0aec0;
+            font-style: italic;
+        }
+
+        .keyword-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 0.35rem 0.8rem;
+            border-radius: 50px;
+            font-size: 0.88rem;
+            font-weight: 500;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            animation: tagSlideIn 0.3s ease;
+        }
+
+        @keyframes tagSlideIn {
+            from {
+                opacity: 0;
+                transform: scale(0.8);
+            }
+
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+
+        .keyword-tag button {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 2px 6px;
+            margin: 0;
+            line-height: 1;
+            border-radius: 50%;
+            transition: all 0.2s;
+        }
+
+        .keyword-tag button:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        .word-boost-input-wrapper {
+            position: relative;
+        }
+
+        .word-boost-input-wrapper textarea {
+            padding-bottom: 50px;
+        }
+
+        .add-keywords-btn {
+            position: absolute;
+            bottom: 10px;
+            right: 10px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
+        }
+
+        .add-keywords-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(102, 126, 234, 0.4);
+        }
     </style>
 </head>
 
@@ -188,10 +285,28 @@
         </div>
 
         <div class="form-group">
-            <label for="wordBoost">🎯 關鍵詞設定 (Word Boost)</label>
-            <textarea id="wordBoost" placeholder="每行一個關鍵詞&#10;JBS商學院&#10;股價&#10;成長價值"></textarea>
-            <div class="help-text">
-                輸入會議中常用的關鍵詞，可提升語音辨識準確度。每行一個，最多 100 個詞。
+            <label><svg style="width:16px;height:16px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24"
+                    fill="none" stroke="#805ad5" stroke-width="2">
+                    <circle cx="12" cy="12" r="10" />
+                    <circle cx="12" cy="12" r="3" />
+                </svg>關鍵詞設定 (Word Boost)</label>
+            <div class="word-boost-container">
+                <div id="wordBoostTags" class="word-boost-tags">
+                    <!-- 動態生成的關鍵詞標籤 -->
+                </div>
+                <div class="word-boost-input-wrapper">
+                    <textarea id="wordBoost" placeholder="輸入新的關鍵詞，每行一個&#10;JBS商學院&#10;股價&#10;成長價值" rows="4"></textarea>
+                    <button type="button" class="add-keywords-btn" onclick="addKeywords()">
+                        <svg style="width:14px;height:14px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24"
+                            fill="none" stroke="white" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19" />
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                        </svg>新增關鍵詞
+                    </button>
+                </div>
+                <div class="help-text">
+                    輸入會議中常用的關鍵詞，可提升語音辨識準確度。
+                </div>
             </div>
         </div>
 
@@ -216,6 +331,7 @@
 
         let currentUser = null;
         let roomId = null;
+        let currentKeywords = []; // 儲存當前的關鍵詞
 
         // 檢查登入狀態
         async function checkAuth() {
@@ -272,7 +388,8 @@
 
                 // 載入 Word Boost 關鍵詞
                 if (room.word_boost && room.word_boost.length > 0) {
-                    document.getElementById('wordBoost').value = room.word_boost.join('\n');
+                    currentKeywords = room.word_boost;
+                    renderKeywordTags();
                 }
 
             } catch (error) {
@@ -355,6 +472,52 @@
             }
         }
 
+        // 渲染關鍵詞標籤
+        function renderKeywordTags() {
+            const container = document.getElementById('wordBoostTags');
+            if (currentKeywords.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = currentKeywords.map((keyword, index) => `
+                <span class="keyword-tag">
+                    ${keyword}
+                    <button type="button" onclick="removeKeyword(${index})" title="刪除">×</button>
+                </span>
+            `).join('');
+        }
+
+        // 新增關鍵詞
+        function addKeywords() {
+            const textarea = document.getElementById('wordBoost');
+            const text = textarea.value.trim();
+
+            if (!text) {
+                alert('請輸入關鍵詞');
+                return;
+            }
+
+            const newKeywords = text
+                .split('\n')
+                .map(w => w.trim())
+                .filter(w => w.length > 0 && !currentKeywords.includes(w)); // 排除重複
+
+            if (newKeywords.length === 0) {
+                alert('所有關鍵詞都已存在或為空');
+                return;
+            }
+
+            currentKeywords = [...currentKeywords, ...newKeywords];
+            renderKeywordTags();
+            textarea.value = ''; // 清空輸入框
+        }
+
+        // 刪除單個關鍵詞
+        function removeKeyword(index) {
+            currentKeywords.splice(index, 1);
+            renderKeywordTags();
+        }
+
         // 儲存所有變更（Email + Word Boost）
         async function saveAll() {
             try {
@@ -388,13 +551,6 @@
                 }
 
                 // 2. 處理 Word Boost 關鍵詞 + 更新房間名稱
-                const wordBoostText = document.getElementById('wordBoost').value.trim();
-                const wordBoost = wordBoostText
-                    .split('\n')
-                    .map(w => w.trim())
-                    .filter(w => w.length > 0)
-                    .slice(0, 100); // 最多 100 個詞
-
                 const newRoomName = document.getElementById('roomName').value.trim();
                 if (!newRoomName) {
                     alert('請輸入會議室名稱');
@@ -404,7 +560,7 @@
                 const { error: boostError } = await supabaseClient
                     .from('rooms')
                     .update({
-                        word_boost: wordBoost,
+                        word_boost: currentKeywords,
                         room_name: newRoomName
                     })
                     .eq('room_id', roomId);
