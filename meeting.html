@@ -215,83 +215,98 @@
             currentUser = session.user;
             console.log('✅ 使用者已登入', currentUser.email);
 
-            // 檢查是否為房主 & 處理歷史紀錄
+            // 1. 先訂閱必要頻道
+            subscribeToSessionBroadcast();
+            subscribeToParticipants();
+            subscribeToCaptions();
+
+            // 2. 判定權限 & Session
             await handleOwnerSession();
 
-            // 載入 Word Boost 關鍵詞
+            // 3. 其他初始化
             await loadRoomWordBoost();
+            initSpeechRecognition();
         });
+
+        // 訂閱 Session 廣播 (取代資料庫欄位同步)
+        function subscribeToSessionBroadcast() {
+            const channel = supabaseClient.channel(`session-${MEETING_ID}`);
+            channel
+                .on('broadcast', { event: 'new_session' }, (payload) => {
+                    console.log('📡 收到 Session 同步指令:', payload);
+                    if (payload.sessionStartTime) {
+                        sessionStartTime = payload.sessionStartTime;
+                        // 收到新 Session 通知時，如果不是房主，則重載視圖
+                        if (!isOwner) {
+                            refreshLiveView();
+                        }
+                    }
+                })
+                .subscribe();
+            window.sessionChannel = channel;
+        }
+
+        async function refreshLiveView() {
+            const captionBar = document.getElementById('captionBar');
+            const captionFull = document.getElementById('captionFull');
+            if (captionBar) captionBar.innerHTML = '';
+            if (captionFull) captionFull.innerHTML = '';
+            await loadRecentHistory();
+        }
 
         // 處理房主 Session：如果是房主，則重置 Session 起點；如果不是，則載入歷史
         async function handleOwnerSession() {
             try {
-                // 檢查房間權限
                 const hasAccess = await checkRoomAccess();
                 if (!hasAccess) return;
 
-                // 從 room_access 檢查目前使用者是否為該房間的擁有者 (建立者)
-                const { data, error } = await supabaseClient
+                const { data: accessData } = await supabaseClient
                     .from('room_access')
                     .select('email')
                     .eq('room_id', MEETING_ID);
 
-                // 取得擁有者名單
-                const ownerEmails = data ? data.map(item => item.email) : [];
+                const ownerEmails = accessData ? accessData.map(item => item.email) : [];
 
-                if (!error && ownerEmails.includes(currentUser.email)) {
+                if (ownerEmails.includes(currentUser.email)) {
                     isOwner = true;
-                    console.log('👑 您是此會議室的房主，正在更新 Session 起點...');
-                    // 更新房間的最後重置時間，作為當前 Session 的開始
+                    console.log('👑 您是此會議室的房主');
+                    // 房主進場即標記為新會話開始時間
                     sessionStartTime = new Date().toISOString();
-                    await updateRoomResetTime(sessionStartTime);
+
+                    // 廣播給在場所有人 (雖然剛進房可能沒人，但確保之後加入的人能推導)
+                    broadcastSessionStart(sessionStartTime);
                 } else {
                     isOwner = false;
-                    console.log('👥 您是參與者，正在取得房主設定的 Session 起點...');
-                    // 非房主進來：取得該房間最後一次重置的時間
-                    const { data: roomData } = await supabaseClient
-                        .from('rooms')
-                        .select('last_reset_at')
-                        .eq('room_id', MEETING_ID)
-                        .single();
-
-                    if (roomData && roomData.last_reset_at) {
-                        sessionStartTime = roomData.last_reset_at;
-                    }
-                    // 根據起點載入紀錄
-                    await loadRecentHistory();
+                    console.log('👥 您是參與者，嘗試尋找最近的 Session 起點...');
+                    // 如果沒有收到廣播，則預設載入房主最後在線的時間點或最近 1 小時
+                    // 這裡暫時定為 1 小時內，直到收到廣播
+                    const oneHourAgo = new Date(Date.now() - 3600000).toISOString();
+                    sessionStartTime = oneHourAgo;
                 }
 
-                // --- 所有必要的初始化呼叫 ---
-                await joinMeeting(); // 加入會議室 (participants 表格)
-                subscribeToParticipants(); // 訂閱參與者
-                subscribeToCaptions(); // 訂閱字幕
-                initSpeechRecognition(); // 初始化語音辨識
-                await loadParticipants(); // 載入現有參與者
+                await joinMeeting();
+                await loadParticipants();
+                await loadRecentHistory();
 
             } catch (err) {
-                console.warn('Session 處理失敗', err);
+                console.warn('Session 初始化異常', err);
                 await joinMeeting();
-                subscribeToParticipants();
-                subscribeToCaptions();
-                initSpeechRecognition();
                 await loadRecentHistory();
             }
         }
 
-        // 更新房間的重置時間 (不刪除任何數據)
-        async function updateRoomResetTime(timestamp) {
-            try {
-                const { error } = await supabaseClient
-                    .from('rooms')
-                    .update({ last_reset_at: timestamp })
-                    .eq('room_id', MEETING_ID);
-
-                if (error) throw error;
-                console.log('🕒 會議起點已同步:', timestamp);
-            } catch (err) {
-                console.error('更新重置時間失敗:', err);
+        function broadcastSessionStart(time) {
+            if (window.sessionChannel) {
+                window.sessionChannel.send({
+                    type: 'broadcast',
+                    event: 'new_session',
+                    sessionStartTime: time
+                });
             }
         }
+
+        // 移除報錯的資料庫更新函數
+        // async function updateRoomResetTime... (不再需要)
 
         // 清空視圖指令轉發 (不再物理刪除)
         async function clearMeetingHistory() {
@@ -401,22 +416,25 @@
         }
 
         async function isHostOffline(ownerEmails) {
-            const { data } = await supabaseClient
-                .from('participants')
-                .select('user_metadata, status')
-                .eq('meeting_id', MEETING_ID)
-                .eq('status', 'online');
+            try {
+                const { data } = await supabaseClient
+                    .from('participants')
+                    .select('user_metadata, status')
+                    .eq('meeting_id', MEETING_ID)
+                    .eq('status', 'online');
 
-            if (!data || data.length === 0) return true;
+                if (!data || data.length === 0) return true;
 
-            // 檢查在線列表中是否有任何一位是擁有者
-            const isAnyOwnerOnline = data.some(p => {
-                // 假設 email 存放在 user_metadata 中
-                const pEmail = p.user_metadata?.email || "";
-                return ownerEmails.includes(pEmail);
-            });
+                // 檢查在線列表中是否有任何一位是擁有者
+                const isAnyOwnerOnline = data.some(p => {
+                    const pEmail = p.user_metadata?.email || "";
+                    return ownerEmails.includes(pEmail);
+                });
 
-            return !isAnyOwnerOwnerOnline;
+                return !isAnyOwnerOnline;
+            } catch (e) {
+                return false;
+            }
         }
 
         // 訂閱字幕
@@ -1298,19 +1316,33 @@
             const captionBar = document.getElementById('captionBar');
             const captionFull = document.getElementById('captionFull');
 
-            // 移除對應使用者的即時字幕
+            // 1. 處理收合狀態下的字幕條 (Caption Bar)
+            updateCollapsedView(caption);
+
+            // 2. 處理展開狀態下的完整視圖 (Caption Full)
+            updateExpandedView(caption);
+
+            // 3. 處理捲動
+            if (shouldScroll) {
+                scrollToBottom(captionBar, captionFull);
+            }
+        }
+
+        // --- 字幕條渲染 (收合視窗) ---
+        function updateCollapsedView(caption) {
+            const captionBar = document.getElementById('captionBar');
+            if (!captionBar) return;
+
+            // 移除對應使用者的即時字幕占位
             const interimId = `interim-${caption.user_id}`;
             const interimEl = captionBar.querySelector(`#${interimId}`);
             if (interimEl) interimEl.remove();
 
-            const now = new Date(caption.created_at).toLocaleTimeString('zh-TW');
-
-            // 產生標籤 HTML (從文字中重新提取)
+            // 如果會議室容器已展開，我們可能不需要更新字幕條？不，為了切換一致，兩邊都更新
             const tags = getNumericalTags(caption.text);
             const tagsHtml = tags.length > 0 ?
                 `<div class="caption-tags">${tags.map(t => `<span class="caption-tag">${t}</span>`).join('')}</div>` : '';
 
-            // 字幕條：只保留最近 3 行
             const captionItem = document.createElement('div');
             captionItem.className = 'caption-item';
             captionItem.innerHTML = `
@@ -1320,15 +1352,25 @@
             `;
             captionBar.appendChild(captionItem);
 
-            // 只保留最近 3 行
+            // 嚴格保留最新 3 行
             const items = captionBar.querySelectorAll('.caption-item:not(.interim-caption)');
             if (items.length > 3) {
                 for (let i = 0; i < items.length - 3; i++) {
                     items[i].remove();
                 }
             }
+        }
 
-            // 完整字幕：保留所有
+        // --- 完整視圖渲染 (展開視窗) ---
+        function updateExpandedView(caption) {
+            const captionFull = document.getElementById('captionFull');
+            if (!captionFull) return;
+
+            const now = new Date(caption.created_at).toLocaleTimeString('zh-TW');
+            const tags = getNumericalTags(caption.text);
+            const tagsHtml = tags.length > 0 ?
+                `<div class="caption-tags">${tags.map(t => `<span class="caption-tag">${t}</span>`).join('')}</div>` : '';
+
             const captionFullItem = document.createElement('div');
             captionFullItem.className = 'caption-item-full';
             captionFullItem.innerHTML = `
@@ -1340,21 +1382,18 @@
                 ${tagsHtml}
             `;
             captionFull.appendChild(captionFullItem);
+        }
 
-            // 如果需要滾動
-            if (shouldScroll) {
-                // 強制渲染後滾動 (加上較大的位移確保觸底)
-                requestAnimationFrame(() => {
-                    captionBar.scrollTop = captionBar.scrollHeight + 500;
-                    captionFull.scrollTop = captionFull.scrollHeight + 500;
-                });
-
-                // 針對 iOS/Safari 的額外延遲補償
+        function scrollToBottom(el1, el2) {
+            requestAnimationFrame(() => {
+                if (el1) el1.scrollTop = el1.scrollHeight + 1000;
+                if (el2) el2.scrollTop = el2.scrollHeight + 1000;
+                // 強制在下一幀再做一次以解決動態內容高度變化延遲
                 setTimeout(() => {
-                    captionBar.scrollTop = captionBar.scrollHeight + 500;
-                    captionFull.scrollTop = captionFull.scrollHeight + 500;
-                }, 150);
-            }
+                    if (el1) el1.scrollTop = el1.scrollHeight + 1000;
+                    if (el2) el2.scrollTop = el2.scrollHeight + 1000;
+                }, 100);
+            });
         }
 
         // HTML 轉義
