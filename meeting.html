@@ -141,6 +141,7 @@
         const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImluenFzZGVscnd4eGxiY3VtYWl3Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njc3MTQzMjksImV4cCI6MjA4MzI5MDMyOX0.XBrMbxu_vcNQb55v6OZNoB-Mm1w-A2OtJk1AAgofjg0';
 
 
+
         let currentUser = null;
         let recognition = null;
         let isRecording = false;
@@ -261,13 +262,17 @@
                 })
                 .subscribe(async (status) => {
                     if (status === 'SUBSCRIBED') {
-                        // 追蹤自己
-                        await channel.track({
-                            user_id: currentUser.id,
-                            user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
-                            email: currentUser.email,
-                            online_at: new Date().toISOString(),
-                        });
+                        // 追蹤自己 (稍微延遲一下，等 handleOwnerSession 確定 isOwner)
+                        setTimeout(async () => {
+                            await channel.track({
+                                user_id: currentUser.id,
+                                user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                                email: currentUser.email,
+                                is_host: isOwner,
+                                session_start_time: isOwner ? sessionStartTime : null,
+                                online_at: new Date().toISOString(),
+                            });
+                        }, 500);
                     }
                 });
 
@@ -286,6 +291,7 @@
                 }
             }
             loadParticipantsFromPresence(users);
+            checkHostStatus(); // 每次同步都檢查一次
         }
 
         // 強制重新載入當前 Session 視圖
@@ -335,25 +341,48 @@
                 const hasAccess = await checkRoomAccess();
                 if (!hasAccess) return;
 
-                const { data: accessData } = await supabaseClient
-                    .from('room_access')
-                    .select('email')
-                    .eq('room_id', MEETING_ID);
+                // 🔴 關鍵改動：從 rooms 表查詢真正的創立者 (created_by)
+                const { data: roomData, error: roomError } = await supabaseClient
+                    .from('rooms')
+                    .select('created_by')
+                    .eq('room_id', MEETING_ID)
+                    .single();
 
-                const ownerEmails = accessData ? accessData.map(item => item.email) : [];
+                if (roomError) {
+                    // 若 rooms 表查不到 (可能是舊格式或 main-room)，回退到 room_access 判定或忽略
+                    console.warn('無法從 rooms 表確認房主身分，使用存取列表判定');
+                    const { data: accessData } = await supabaseClient
+                        .from('room_access')
+                        .select('email')
+                        .eq('room_id', MEETING_ID);
+                    const ownerEmails = accessData ? accessData.map(item => item.email) : [];
+                    isOwner = ownerEmails.includes(currentUser.email);
+                } else {
+                    // 以 created_by UID 為準
+                    isOwner = (roomData.created_by === currentUser.id);
+                }
 
-                if (ownerEmails.includes(currentUser.email)) {
-                    isOwner = true;
-                    console.log('👑 您是此會議室的房主');
-                    // 房主進場
+                if (isOwner) {
+                    console.log('👑 您是此會議室的真正房主');
                     sessionStartTime = new Date().toISOString();
-                    // 廣播給所有人
+                    // 廣播與 Presence 更新
                     broadcastSessionStart(sessionStartTime);
                 } else {
                     isOwner = false;
                     console.log('👥 您是參與者，正在推導 Session 起點...');
-                    // 先抓取目前在線的人中，房主的狀態
                     await deriveSessionFromHost();
+                }
+
+                // 更新自己的 Presence 標籤
+                if (window.roomChannel) {
+                    await window.roomChannel.track({
+                        user_id: currentUser.id,
+                        user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                        email: currentUser.email,
+                        is_host: isOwner,
+                        session_start_time: isOwner ? sessionStartTime : null,
+                        online_at: new Date().toISOString(),
+                    });
                 }
 
                 await joinMeeting();
@@ -484,42 +513,29 @@
                 .subscribe();
         }
 
-        // 檢查主持人是否在線
-        async function checkHostStatus() {
-            try {
-                const { data: owners } = await supabaseClient
-                    .from('room_access')
-                    .select('email')
-                    .eq('room_id', MEETING_ID);
-                const ownerEmails = (owners || []).map(o => o.email);
+        // 檢查主持人是否在線 (基於 Presence 的最終方案)
+        function checkHostStatus() {
+            if (isOwner) return; // 我就是房主，不用檢查
 
-                // 抓取在線列表 (只抓必要欄位，防止 400)
-                const { data: onlineList } = await supabaseClient
-                    .from('participants')
-                    .select('user_name, status')
-                    .eq('meeting_id', MEETING_ID)
-                    .eq('status', 'online');
+            if (!window.roomChannel) return;
 
-                if (!onlineList || onlineList.length === 0) {
-                    if (!isOwner) triggerHostLeave();
-                    return;
-                }
+            const state = window.roomChannel.presenceState();
+            const users = Object.values(state).flat();
+            const hostOnline = users.some(u => u.is_host);
 
-                // 比對人名 (假設 user_name 包含 email 前綴或者是可辨識的)
-                // 更好的做法是 participants 存 user_id
-                const isHostOnline = onlineList.some(p => {
-                    // 如果 user_name 包含房主 email 的一部分
-                    return ownerEmails.some(email => {
-                        const prefix = email.split('@')[0];
-                        return p.user_name.includes(prefix);
-                    });
-                });
+            console.log('🔍 檢查房主狀態:', hostOnline ? '在線' : '下線');
 
-                if (!isHostOnline && !isOwner) {
-                    triggerHostLeave();
-                }
-            } catch (e) {
-                console.warn('檢查主機狀態錯誤');
+            if (!hostOnline) {
+                // 為了防止瞬斷誤判，我們在 3 秒後再確認一次
+                setTimeout(() => {
+                    const latestState = window.roomChannel.presenceState();
+                    const latestUsers = Object.values(latestState).flat();
+                    const stillOffline = !latestUsers.some(u => u.is_host);
+                    if (stillOffline) {
+                        console.warn('🚨 房主確定下線，觸發清場');
+                        triggerHostLeave();
+                    }
+                }, 3000);
             }
         }
 

@@ -322,6 +322,7 @@
         const { createClient } = supabase;
         const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+
         // 檢查登入狀態
         async function checkLoginStatus() {
             const { data: { session } } = await supabaseClient.auth.getSession();
@@ -375,20 +376,6 @@
         // 初始化
         console.log('開始檢查登入狀態');
         checkLoginStatus();
-
-        // 錯誤屏蔽器：過濾掉來自瀏覽器擴充功能（如 Chrome Extensions）的無關報錯，保持 Console 乾淨
-        window.addEventListener('error', (e) => {
-            if (e.message.includes('chrome-extension') || e.message.includes('Receiving end does not exist')) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-        }, true);
-
-        window.addEventListener('unhandledrejection', (e) => {
-            if (e.reason && (e.reason.message?.includes('chrome-extension') || e.reason.message?.includes('Receiving end'))) {
-                e.preventDefault();
-            }
-        });
     </script>
 </body>
 
