@@ -215,43 +215,118 @@
             currentUser = session.user;
             console.log('✅ 使用者已登入', currentUser.email);
 
-            // 1. 先訂閱必要頻道
-            subscribeToSessionBroadcast();
-            subscribeToParticipants();
+            // 1. 初始化房間頻道 (包含 Presence)
+            initRoomChannel();
+
+            // 2. 訂閱必要頻道
             subscribeToCaptions();
 
-            // 2. 判定權限 & Session
+            // 3. 判定權限 & Session
             await handleOwnerSession();
 
-            // 3. 其他初始化
+            // 4. 其他初始化
             await loadRoomWordBoost();
             initSpeechRecognition();
         });
 
-        // 訂閱 Session 廣播 (取代資料庫欄位同步)
-        function subscribeToSessionBroadcast() {
-            const channel = supabaseClient.channel(`session-${MEETING_ID}`);
+        // 初始化房間頻道與 Presence
+        function initRoomChannel() {
+            const channel = supabaseClient.channel(`room-${MEETING_ID}`, {
+                config: {
+                    presence: {
+                        key: currentUser.id,
+                    },
+                },
+            });
+
             channel
+                .on('presence', { event: 'sync' }, () => {
+                    const newState = channel.presenceState();
+                    console.log('👥 目前在線名單:', newState);
+                    handlePresenceSync(newState);
+                })
+                .on('presence', { event: 'join' }, ({ key, newPresences }) => {
+                    console.log('👋 有人進來了:', newPresences);
+                })
+                .on('presence', { event: 'leave' }, ({ key, leftPresences }) => {
+                    console.log('🏃 有人離開了:', leftPresences);
+                    checkHostLeave(leftPresences);
+                })
                 .on('broadcast', { event: 'new_session' }, (payload) => {
-                    console.log('📡 收到 Session 同步指令:', payload);
+                    console.log('📡 收到房主 Session 指令:', payload);
                     if (payload.sessionStartTime) {
                         sessionStartTime = payload.sessionStartTime;
-                        // 收到新 Session 通知時，如果不是房主，則重載視圖
-                        if (!isOwner) {
-                            refreshLiveView();
-                        }
+                        refreshLiveView();
                     }
                 })
-                .subscribe();
-            window.sessionChannel = channel;
+                .subscribe(async (status) => {
+                    if (status === 'SUBSCRIBED') {
+                        // 追蹤自己
+                        await channel.track({
+                            user_id: currentUser.id,
+                            user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                            email: currentUser.email,
+                            online_at: new Date().toISOString(),
+                        });
+                    }
+                });
+
+            window.roomChannel = channel;
         }
 
-        async function refreshLiveView() {
+        function handlePresenceSync(state) {
+            // 從 Presence 狀態中找尋房主，並同步其 Session 起點
+            const users = Object.values(state).flat();
+            const host = users.find(u => u.is_host);
+            if (host && host.session_start_time && !isOwner) {
+                if (sessionStartTime !== host.session_start_time) {
+                    console.log('🔄 同步房主 Session 起點:', host.session_start_time);
+                    sessionStartTime = host.session_start_time;
+                    refreshLiveView();
+                }
+            }
+            loadParticipantsFromPresence(users);
+        }
+
+        // 強制重新載入當前 Session 視圖
+        function refreshLiveView() {
+            console.log('🔄 重新整理 Live 視圖...');
             const captionBar = document.getElementById('captionBar');
             const captionFull = document.getElementById('captionFull');
             if (captionBar) captionBar.innerHTML = '';
             if (captionFull) captionFull.innerHTML = '';
-            await loadRecentHistory();
+            loadRecentHistory();
+        }
+
+        function checkHostLeave(leftUsers) {
+            if (isOwner) return;
+            const hostLeft = leftUsers.some(u => u.is_host);
+            if (hostLeft) {
+                console.log('⚠️ 房主已離開');
+                triggerHostLeave();
+            }
+        }
+
+        // 定期檢查 Presence 確保房主還在
+        setInterval(() => {
+            if (!isOwner && window.roomChannel) {
+                const state = window.roomChannel.presenceState();
+                const users = Object.values(state).flat();
+                const hostOnline = users.some(u => u.is_host);
+                if (!hostOnline && users.length > 0) { // 只有在有人的情況下才踢
+                    // triggerHostLeave(); 
+                }
+            }
+        }, 5000);
+
+        function loadParticipantsFromPresence(users) {
+            // 更新畫面的參與者清單 (替代部分資料庫負擔)
+            const countEl = document.getElementById('participantCount');
+            if (countEl) countEl.textContent = `${users.length} 人在線`;
+        }
+
+        function subscribeToSessionBroadcast() {
+            // 已併入 initRoomChannel
         }
 
         // 處理房主 Session：如果是房主，則重置 Session 起點；如果不是，則載入歷史
@@ -332,6 +407,10 @@
 
         // 載入當前 Session 的對話紀錄
         async function loadRecentHistory() {
+            if (!sessionStartTime) {
+                console.warn('⚠️ 尚未取得 Session 起點，跳過載入歷史');
+                return;
+            }
             console.log('📜 正在載入 Session 起點以後的紀錄...', sessionStartTime);
             try {
                 const { data, error } = await supabaseClient
@@ -342,6 +421,12 @@
                     .order('created_at', { ascending: true });
 
                 if (error) throw error;
+
+                // 清空舊視圖防止重複載入
+                const captionBar = document.getElementById('captionBar');
+                const captionFull = document.getElementById('captionFull');
+                if (captionBar) captionBar.innerHTML = '';
+                if (captionFull) captionFull.innerHTML = '';
 
                 if (data && data.length > 0) {
                     console.log(`✅ 已載入 ${data.length} 條 Live 對話`);
@@ -753,17 +838,45 @@
                     const tagsFromAai = getNumericalTags(aaiText);
                     const numericalTags = [...new Set([...tagsFromDg, ...tagsFromAai])];
 
-                    // 決定要顯示的文字：優先用 AAI，若 AAI 沒結果但 DG 有數據，則顯示 DG 的結果
-                    let displayText = aaiText.trim();
-                    if (!displayText && numericalTags.length > 0) {
-                        displayText = dgText.trim();
-                    }
+                    // 處理顯示與儲存 (整合兩邊結果提升精準度)
+                    if (aaiText || dgText) {
+                        let processedText = aaiText.trim();
 
-                    // 處理顯示與儲存
-                    if (displayText) {
-                        const processedText = await addPunctuation(displayText);
-                        showLocalCaption(processedText, numericalTags);
-                        saveCaption(processedText, true);
+                        // 雙 AI 數字校正邏輯：
+                        // 如果 Deepgram 偵測到數字，而 AAI 提供的是中文描述或可能不精準
+                        // 我們發送給 AI 進行交叉比對修正
+                        if (numericalTags.length > 0) {
+                            try {
+                                const response = await fetch(PUNCTUATION_API_URL, {
+                                    method: 'POST',
+                                    headers: {
+                                        'Content-Type': 'application/json',
+                                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                                    },
+                                    body: JSON.stringify({
+                                        mode: 'correction', // 特殊模式：數字校正
+                                        aaiTranscript: aaiText,
+                                        dgTranscript: dgText,
+                                        tags: numericalTags
+                                    })
+                                });
+                                if (response.ok) {
+                                    const data = await response.json();
+                                    processedText = data.text || processedText;
+                                    console.log('💎 雙 AI 數字校正後:', processedText);
+                                }
+                            } catch (e) {
+                                console.warn('數字校正失敗，回退至標點處理');
+                                processedText = await addPunctuation(processedText || dgText);
+                            }
+                        } else {
+                            processedText = await addPunctuation(processedText || dgText);
+                        }
+
+                        if (processedText) {
+                            showLocalCaption(processedText, numericalTags);
+                            saveCaption(processedText, true);
+                        }
                     }
 
                 } catch (error) {
