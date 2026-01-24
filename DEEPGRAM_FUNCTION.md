@@ -43,28 +43,49 @@ serve(async (req) => {
 
     // 取得房間創建者的 ID
     let ownerId = user.id;
+    let isVisitor = false;
     if (roomId && roomId !== 'main-room') {
       const { data: room } = await supabase
         .from('rooms')
         .select('created_by')
         .eq('room_id', roomId)
         .single();
-      if (room && room.created_by) ownerId = room.created_by;
+      if (room && room.created_by) {
+          ownerId = room.created_by;
+          if (ownerId !== user.id) isVisitor = true;
+      }
     }
 
-    // 取得有效 Deepgram API Key
-    const { data: accounts } = await supabase
+    console.log(`Checking Deepgram key for ownerId: ${ownerId} (Current User: ${user.id})`);
+
+    // 取得有效 Deepgram API Key (優先找 Room Creator)
+    let { data: accounts } = await supabase
       .from('speech_api_accounts')
-      .select('id, api_key')
+      .select('id, api_key, provider')
       .eq('user_id', ownerId)
       .eq('provider', 'deepgram')
       .eq('api_exhausted', false)
       .order('is_active', { ascending: false })
       .limit(1);
 
+    // 如果 Creator 沒設定，且當前使用者不是 Creator，則嘗試用當前使用者的 Key
+    if ((!accounts || accounts.length === 0) && isVisitor) {
+        console.log(`Room creator has no Deepgram key. Falling back to current user: ${user.id}`);
+        const { data: visitorAccounts } = await supabase
+          .from('speech_api_accounts')
+          .select('id, api_key, provider')
+          .eq('user_id', user.id)
+          .eq('provider', 'deepgram')
+          .eq('api_exhausted', false)
+          .order('is_active', { ascending: false })
+          .limit(1);
+        accounts = visitorAccounts;
+    }
+
     if (!accounts || accounts.length === 0) {
+      console.error(`No Deepgram API key found for owner ${ownerId} or visitor ${user.id}`);
       return new Response(JSON.stringify({ 
-        error: "Room creator has no active Deepgram API key" 
+        error: "No active Deepgram API key found in this room. Please set up one in settings." 
       }), {
         status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" }
       });
@@ -72,6 +93,7 @@ serve(async (req) => {
 
     const apiKey = accounts[0].api_key;
     const accountId = accounts[0].id;
+    console.log(`Using Deepgram account: ${accountId} (Provider: ${accounts[0].provider})`);
 
     // 呼叫 Deepgram API
     // 使用 Nova-2 模型並開啟 smart_format

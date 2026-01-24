@@ -297,6 +297,7 @@
                     console.log('🔌 字幕訂閱狀態:', status);
                 });
         }
+
         function showDataSnapshot(number, context) {
             console.log('💎 偵測到關鍵數據:', number);
             const container = document.getElementById('snapshotContainer');
@@ -320,6 +321,17 @@
             // 限制數量，避免過多
             if (container.children.length > 5) {
                 container.removeChild(container.firstChild);
+            }
+        }
+
+        // --- 相容性補丁：避免舊程式碼呼叫 addCaption 導致崩潰 ---
+        function addCaption(speaker, text, isFinal = true) {
+            console.log('🔄 呼叫相容層 addCaption:', speaker, text);
+            if (isFinal) {
+                showLocalCaption(text);
+                saveCaption(text, true);
+            } else {
+                showInterimCaption(text);
             }
         }
 
@@ -524,6 +536,8 @@
                     const { data: { session } } = await supabaseClient.auth.getSession();
                     if (!session) return;
 
+                    console.log('📤 同步呼叫 AssemblyAI 與 Deepgram...');
+
                     // 1. 呼叫 AssemblyAI (主文字)
                     const assemblyRequest = fetch(ASSEMBLYAI_URL, {
                         method: 'POST',
@@ -537,7 +551,7 @@
                             roomId: MEETING_ID,
                             wordBoost: roomWordBoost
                         })
-                    }).then(res => res.json()).catch(err => ({ error: err.message }));
+                    }).then(res => res.json()).catch(err => ({ error: 'AssemblyAI 呼叫失敗: ' + err.message }));
 
                     // 2. 呼叫 Deepgram (數字輔助)
                     const deepgramRequest = fetch(DEEPGRAM_URL, {
@@ -551,13 +565,16 @@
                             language: language,
                             roomId: MEETING_ID
                         })
-                    }).then(res => res.json()).catch(err => ({ error: err.message }));
+                    }).then(res => res.json()).catch(err => ({ error: 'Deepgram 呼叫失敗: ' + err.message }));
 
-                    // 並行處理
+                    // 並行取得結果
                     const [aaiResult, dgResult] = await Promise.all([assemblyRequest, deepgramRequest]);
 
-                    console.log('📡 AssemblyAI:', aaiResult);
-                    console.log('📡 Deepgram:', dgResult);
+                    if (dgResult.error) console.warn('⚠️ Deepgram 錯誤:', dgResult.error);
+                    else console.log('🎯 Deepgram 辨識成功:', dgResult.transcript);
+
+                    if (aaiResult.error) console.error('❌ AssemblyAI 錯誤:', aaiResult.error);
+                    else console.log('📝 AssemblyAI 辨識成功:', aaiResult.transcript);
 
                     // 處理 Deepgram (數字提取)
                     if (dgResult && dgResult.transcript) {
@@ -566,14 +583,13 @@
 
                     // 處理 AssemblyAI (主字幕)
                     if (aaiResult && aaiResult.transcript && aaiResult.transcript.trim()) {
-                        // 先用 AI 處理標點，再顯示和儲存
                         const processedText = await addPunctuation(aaiResult.transcript);
                         showLocalCaption(processedText);
-                        saveCaption(processedText, true); // true = 已處理過
+                        saveCaption(processedText, true);
                     }
 
                 } catch (error) {
-                    console.error('API 處理總體失敗:', error);
+                    console.error('音频處理邏輯重大錯誤:', error);
                 }
             };
             reader.readAsDataURL(audioBlob);
