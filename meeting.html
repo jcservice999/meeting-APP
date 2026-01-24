@@ -597,15 +597,24 @@
 
         // 提取數字並顯示快照
         function extractAndShowNumbers(text) {
-            // 匹配阿拉伯數字（包含小數點、百分比、逗號分隔）
-            const numRegex = /\d+([,.]\d+)*%?/g;
-            const matches = text.match(numRegex);
+            // 匹配數字以及可能跟隨的單位（中文、英文、百分比、貨幣符號）
+            // 例如：0.75美金, 60次, 100%, $50
+            const numRegex = /\d+([,.]\d+)*\s*[%$¥€\u4e00-\u9fa5A-Z]{1,4}/gi;
+            const fallbackRegex = /\d+([,.]\d+){1,}/g; // 長度大於 1 的純小數/大數
+
+            let matches = text.match(numRegex) || [];
+            const fallbacks = text.match(fallbackRegex) || [];
+            matches = [...new Set([...matches, ...fallbacks])];
 
             if (matches && matches.length > 0) {
-                matches.forEach(num => {
-                    // 檢查是否太短（避免誤報）
-                    if (num.length >= 1) {
-                        showDataSnapshot(num, text);
+                matches.forEach(match => {
+                    const trimmed = match.trim();
+                    // 過濾：排除太短的純整數（如 '1', '6'）除非它們帶有單位
+                    const hasUnit = /[%$¥€\u4e00-\u9fa5A-Z]/.test(trimmed);
+                    const isLongNum = trimmed.length >= 3;
+
+                    if (hasUnit || isLongNum) {
+                        showDataSnapshot(trimmed, text);
                     }
                 });
             }

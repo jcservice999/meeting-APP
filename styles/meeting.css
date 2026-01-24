@@ -395,21 +395,15 @@
     pointer-events: auto;
     background: linear-gradient(135deg, #38b2ac 0%, #319795 100%);
     color: white;
-    padding: 0.25rem 0.8rem;
+    padding: 0.3rem 1rem;
     border-radius: 50px;
-    font-size: 0.8rem;
+    font-size: 0.85rem;
     font-weight: 700;
     box-shadow: 0 4px 12px rgba(56, 178, 172, 0.3);
     display: flex;
     align-items: center;
-    gap: 0.3rem;
     animation: snapshotPop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     white-space: nowrap;
-}
-
-.snapshot-bubble::before {
-    content: '📊';
-    font-size: 0.9rem;
 }
 
 @keyframes snapshotPop {
@@ -433,11 +427,13 @@
 /* ===== 字幕條 ===== */
 .caption-bar {
     padding: 1.2rem 1.4rem;
-    max-height: 100px;
-    overflow-y: auto;
+    max-height: 180px;
+    /* 增加高度，讓使用者可以滑動多行 */
+    overflow-y: auto !important;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    -webkit-overflow-scrolling: touch;
 }
 
 .caption-item {
@@ -484,8 +480,11 @@
 .caption-full {
     display: none;
     padding: 1rem;
-    padding-bottom: 80px;
-    height: calc(100vh - 60px);
+    flex: 1;
+    /* 讓它佔滿剩餘空間 */
+    height: auto;
+    /* 移除固定高度，由 flex 控制 */
+    max-height: calc(100vh - 120px);
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
@@ -625,14 +624,16 @@
     }
 
     .caption-container.expanded {
-        max-height: calc(70vh);
-        height: calc(70vh);
+        max-height: 85vh;
+        /* 增加展開高度，給手機更多空間 */
+        height: 85vh;
         bottom: 0;
     }
 
     .caption-container.expanded .caption-full {
-        height: calc(70vh - 120px);
-        padding-bottom: 80px;
+        flex: 1;
+        max-height: calc(85vh - 140px);
+        padding-bottom: 20px;
     }
 
     .caption-header {
@@ -645,8 +646,16 @@
     }
 
     .caption-bar {
-        max-height: 100px;
-        overflow-y: auto;
+        max-height: 200px;
+        /* 手機版也增加高度 */
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .snapshot-container {
+        padding: 0.4rem 1rem;
+        min-height: 10px;
+        gap: 0.4rem;
     }
 }
 
