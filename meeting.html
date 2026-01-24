@@ -394,7 +394,7 @@
 
                 if (isOwner) {
                     console.log('👑 您是此會議室的真正房主');
-                    // sessionStartTime = new Date().toISOString(); // 🔴 移除：避免重新整理時重置會話起點
+                    sessionStartTime = new Date().toISOString().replace(/[:.]/g, '-'); // 🟢 生成唯一 Session 標識
                     // 廣播與 Presence 更新
                     broadcastSessionStart(sessionStartTime);
                 } else {
@@ -473,10 +473,11 @@
             }
             console.log('📜 正在載入 Session 起點以後的紀錄...', sessionStartTime);
             try {
+                const sessionTaggedId = MEETING_ID + ':::' + sessionStartTime;
                 const { data, error } = await supabaseClient
                     .from('captions')
                     .select('*')
-                    .eq('meeting_id', MEETING_ID)
+                    .eq('meeting_id', sessionTaggedId) // 🟢 只載入本次 Session 的紀錄
                     .order('created_at', { ascending: true });
 
                 if (error) throw error;
@@ -1431,11 +1432,13 @@
                     }
                 }
 
+                const sessionTaggedId = MEETING_ID + ':::' + sessionStartTime;
+
                 // 非同步儲存，不等待結果
                 supabaseClient
                     .from('captions')
                     .insert({
-                        meeting_id: MEETING_ID,
+                        meeting_id: sessionTaggedId, // 🟢 存入帶有 Session 標籤的 ID
                         user_id: currentUser.id,
                         user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
                         text: finalText,

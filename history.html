@@ -212,17 +212,20 @@
                     return;
                 }
 
-                // 按 meeting_id 和日期分組
+                // 按 meeting_id (含 Session 標籤) 進行分組，達成連線級隔離
                 const meetings = {};
                 data.forEach(caption => {
-                    const meetingId = caption.meeting_id || 'default';
-                    const date = new Date(caption.created_at).toLocaleDateString('zh-TW');
-                    const key = `${meetingId}_${date}`;
+                    const fullId = caption.meeting_id || 'default';
+                    // 分離原始 ID 與 Session 標記
+                    const [rawId, sessionTag] = fullId.split(':::');
+                    const key = fullId; // 直接以完整的 ID:::Session 為 Key
 
                     if (!meetings[key]) {
                         meetings[key] = {
-                            meetingId,
-                            date,
+                            fullId,
+                            meetingId: rawId,
+                            sessionTag: sessionTag || '舊紀錄',
+                            date: new Date(caption.created_at).toLocaleDateString('zh-TW'),
                             captions: [],
                             firstTime: caption.created_at,
                             lastTime: caption.created_at
