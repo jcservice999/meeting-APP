@@ -415,6 +415,8 @@
     flex-direction: column;
     gap: 0.6rem;
     -webkit-overflow-scrolling: touch;
+    padding-bottom: 40px;
+    /* 確保收合狀態下最後一筆可拉到底 */
 }
 
 .caption-item {
@@ -469,6 +471,8 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
+    padding-bottom: 80px;
+    /* 增加底部間距，確保最後一筆不被遮擋 */
 }
 
 .caption-container.expanded .caption-bar {

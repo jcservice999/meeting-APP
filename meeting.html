@@ -232,12 +232,12 @@
                 const { data, error } = await supabaseClient
                     .from('room_access')
                     .select('email')
-                    .eq('room_id', MEETING_ID)
-                    .order('created_at', { ascending: true })
-                    .limit(1)
-                    .single();
+                    .eq('room_id', MEETING_ID);
 
-                if (!error && data && data.email === currentUser.email) {
+                // 只要目前的 email 是清單中的其中一個 (通常第一個是建立者)，我們就視為有管理權限
+                const ownerEmails = data ? data.map(item => item.email) : [];
+
+                if (!error && ownerEmails.includes(currentUser.email)) {
                     isOwner = true;
                     console.log('👑 您是此會議室的房主，正在為您重置對話 Session...');
                     // 房主進來：清空舊紀錄，當作新開始
@@ -382,18 +382,17 @@
             const cleanedText = text.replace(/(\d)。(\d)/g, '$1.$2').replace(/(\d)、(\d)/g, '$1,$2');
 
             // 匹配數字以及可能前後跟隨的單位
-            const unitRegex = /(?:[$¥€]|美金|英鎊|歐元|次|個|台幣|HKD|USD)?\s*\d+(?:[.,]\d+)*\s*(?:[%$¥€\u4e00-\u9fa5A-Z]{1,4})?/gi;
-            const decimalRegex = /[0-9]*[.][0-9]+/g;
+            const units = "美金|元|次|個|%|台幣|HKD|USD|英鎊|歐元|分|點";
+            const regex = new RegExp(`\\d+[.]\\d+\\s*(?:${units})?|(?:[$¥€])?\\d+(?:[,]\\d+)*\\s*(?:${units})|\\d{3,}`, "gi");
 
-            let matches = cleanedText.match(unitRegex) || [];
-            const decimals = cleanedText.match(decimalRegex) || [];
-            matches = [...new Set([...matches, ...decimals])];
+            let matches = cleanedText.match(regex) || [];
+            const results = [...new Set(matches.map(m => m.trim()))];
 
-            return matches.map(m => m.trim()).filter(m => {
-                const hasUnit = /[$¥€%次個\u4e00-\u9fa5A-Z]/.test(m);
-                const hasDot = /[.,]/.test(m);
-                const isLongNum = m.replace(/[^0-9]/g, '').length >= 3;
-                return hasUnit || hasDot || isLongNum;
+            return results.filter(m => {
+                const hasUnit = new RegExp(`[$¥€%${units}]`).test(m);
+                const hasDot = /[.]/.test(m);
+                const digits = m.replace(/[^0-9]/g, '');
+                return hasDot || hasUnit || (digits.length >= 3);
             });
         }
 
@@ -1407,8 +1406,16 @@
         if (toggleBtn) {
             toggleBtn.addEventListener('click', () => {
                 const container = document.getElementById('captionContainer');
+                const captionFull = document.getElementById('captionFull');
                 container.classList.toggle('expanded');
                 toggleBtn.textContent = container.classList.contains('expanded') ? '收合完整視圖' : '展開完整視圖';
+
+                // 展開時自動滾動到底部
+                if (container.classList.contains('expanded')) {
+                    setTimeout(() => {
+                        captionFull.scrollTop = captionFull.scrollHeight + 1000;
+                    }, 100);
+                }
             });
         }
 
