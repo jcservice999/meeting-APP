@@ -157,6 +157,7 @@
         let participantsChannel = null;
         let captionsChannel = null;
         let roomWordBoost = []; // Word Boost 關鍵詞
+        let isOwner = false; // 是否為房主 (創立者)
 
 
         // 檢查房間存取權限
@@ -213,31 +214,73 @@
             currentUser = session.user;
             console.log('✅ 使用者已登入', currentUser.email);
 
-            // 檢查房間權限
-            const hasAccess = await checkRoomAccess();
-            if (!hasAccess) return;
-
-            // 加入會議室
-            await joinMeeting();
-
-            // 訂閱參與者變化
-            subscribeToParticipants();
-
-            // 訂閱字幕
-            subscribeToCaptions();
-
-            // 初始化語音識別
-            initSpeechRecognition();
-
-            // 載入現有參與者
-            await loadParticipants();
-
-            // 載入當前對話紀錄 (供晚進來的人看)
-            await loadRecentHistory();
+            // 檢查是否為房主 & 處理歷史紀錄
+            await handleOwnerSession();
 
             // 載入 Word Boost 關鍵詞
             await loadRoomWordBoost();
         });
+
+        // 處理房主 Session：如果是房主，則清空舊紀錄；如果不是，則載入歷史
+        async function handleOwnerSession() {
+            try {
+                // 檢查房間權限
+                const hasAccess = await checkRoomAccess();
+                if (!hasAccess) return;
+
+                // 從 room_access 檢查目前使用者是否為該房間的擁有者 (建立者)
+                const { data, error } = await supabaseClient
+                    .from('room_access')
+                    .select('email')
+                    .eq('room_id', MEETING_ID)
+                    .order('created_at', { ascending: true })
+                    .limit(1)
+                    .single();
+
+                if (!error && data && data.email === currentUser.email) {
+                    isOwner = true;
+                    console.log('👑 您是此會議室的房主，正在為您重置對話 Session...');
+                    // 房主進來：清空舊紀錄，當作新開始
+                    await clearMeetingHistory();
+                } else {
+                    isOwner = false;
+                    console.log('👥 您是參與者，正在載入今日歷史對話...');
+                    // 一般參與者進來：載入紀錄保持同步
+                    await loadRecentHistory();
+                }
+
+                // --- 補回所有必要的初始化呼叫 ---
+                await joinMeeting(); // 加入會議室 (participants 表格)
+                subscribeToParticipants(); // 訂閱參與者
+                subscribeToCaptions(); // 訂閱字幕
+                initSpeechRecognition(); // 初始化語音辨識
+                await loadParticipants(); // 載入現有參與者
+
+            } catch (err) {
+                console.warn('Session 處理失敗', err);
+                // 失敗時也嘗試基本初始化
+                await joinMeeting();
+                subscribeToParticipants();
+                subscribeToCaptions();
+                initSpeechRecognition();
+                await loadRecentHistory();
+            }
+        }
+
+        // 清空該房間的歷史對話
+        async function clearMeetingHistory() {
+            try {
+                const { error } = await supabaseClient
+                    .from('captions')
+                    .delete()
+                    .eq('meeting_id', MEETING_ID);
+
+                if (error) throw error;
+                console.log('🧹 歷史紀錄已清除，新 Session 開始');
+            } catch (err) {
+                console.error('清除歷史紀錄失敗:', err);
+            }
+        }
 
         // 載入最近的對話紀錄
         async function loadRecentHistory() {
@@ -606,6 +649,15 @@
 
                     if (aaiResult.error) console.error('❌ AssemblyAI 錯誤:', aaiResult.error);
                     else console.log('📝 AssemblyAI 辨識成功:', aaiResult.transcript);
+
+                    // 處理數據提取 (整合兩邊結果提升精準度)
+                    const dgText = (dgResult && dgResult.transcript) ? dgResult.transcript : "";
+                    const aaiText = (aaiResult && aaiResult.transcript) ? aaiResult.transcript : "";
+
+                    // 從兩個結果中都提取標籤並合併去重
+                    const tagsFromDg = getNumericalTags(dgText);
+                    const tagsFromAai = getNumericalTags(aaiText);
+                    const numericalTags = [...new Set([...tagsFromDg, ...tagsFromAai])];
 
                     // 決定要顯示的文字：優先用 AAI，若 AAI 沒結果但 DG 有數據，則顯示 DG 的結果
                     let displayText = aaiText.trim();
