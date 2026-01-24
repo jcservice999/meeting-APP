@@ -267,6 +267,7 @@
                             await channel.track({
                                 user_id: currentUser.id,
                                 user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                                photo_url: currentUser.user_metadata?.avatar_url,
                                 email: currentUser.email,
                                 is_host: isOwner,
                                 session_start_time: isOwner ? sessionStartTime : null,
@@ -282,6 +283,8 @@
         function handlePresenceSync(state) {
             // 從 Presence 狀態中找尋房主，並同步其 Session 起點
             const users = Object.values(state).flat();
+
+            // 1. 同步房主狀態與 Session 起點
             const host = users.find(u => u.is_host);
             if (host && host.session_start_time && !isOwner) {
                 if (sessionStartTime !== host.session_start_time) {
@@ -290,6 +293,21 @@
                     refreshLiveView();
                 }
             }
+
+            // 2. 🟢 核心修正：將 Presence 名單同步到 participants Map 並更新 UI Grid
+            // 這解決了數據庫延遲、幽靈參與者、以及頭像不顯示的問題
+            participants.clear();
+            users.forEach(u => {
+                participants.set(u.user_id, {
+                    user_id: u.user_id,
+                    user_name: u.user_name,
+                    photo_url: u.photo_url,
+                    is_speaking: u.is_speaking || false
+                });
+            });
+
+            // 3. 即時刷新網格與計數
+            updateParticipantGrid();
             loadParticipantsFromPresence(users);
             checkHostStatus(); // 每次同步都檢查一次
         }
@@ -373,11 +391,12 @@
                     await deriveSessionFromHost();
                 }
 
-                // 更新自己的 Presence 標籤
+                // 更新自己的 Presence 標籤 (確保包含頭像)
                 if (window.roomChannel) {
                     await window.roomChannel.track({
                         user_id: currentUser.id,
                         user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                        photo_url: currentUser.user_metadata?.avatar_url,
                         email: currentUser.email,
                         is_host: isOwner,
                         session_start_time: isOwner ? sessionStartTime : null,
@@ -491,27 +510,11 @@
             }
         }
 
-        // 訂閱參與者變化 (包含踢人機制)
-        function subscribeToParticipants() {
-            participantsChannel = supabaseClient
-                .channel('participants-changes')
-                .on('postgres_changes', {
-                    event: '*',
-                    schema: 'public',
-                    table: 'participants',
-                    filter: `meeting_id=eq.${MEETING_ID}`
-                }, async (payload) => {
-                    console.log('參與者變化:', payload);
-
-                    // 檢查主持人狀態
-                    if (payload.eventType === 'UPDATE' || payload.eventType === 'DELETE') {
-                        await checkHostStatus();
-                    }
-
-                    loadParticipants();
-                })
-                .subscribe();
-        }
+        /* 已經改用 Presence 驅動 UI，不需要再監聽資料庫變化防止 Overwrite
+        participantsChannel = supabaseClient
+            .channel('participants-changes')
+            // ...
+        */
 
         // 檢查主持人是否在線 (基於 Presence 的最終方案)
         function checkHostStatus() {
@@ -1289,15 +1292,29 @@
                 }
             }
 
-            // 更新資料庫
+            // 🟢 核心修正：除了資料庫，同步更新 Presence 讓其他人也能即時看到「說話中」的外框
+            if (window.roomChannel) {
+                await window.roomChannel.track({
+                    user_id: currentUser.id,
+                    user_name: currentUser.user_metadata?.full_name || currentUser.email.split('@')[0],
+                    photo_url: currentUser.user_metadata?.avatar_url,
+                    email: currentUser.email,
+                    is_host: isOwner,
+                    is_speaking: speaking, // 同步說話狀態
+                    session_start_time: isOwner ? sessionStartTime : null,
+                    online_at: new Date().toISOString(),
+                });
+            }
+
+            // 異步更新資料庫備份
             try {
-                await supabaseClient
+                supabaseClient
                     .from('participants')
                     .update({ is_speaking: speaking })
                     .eq('meeting_id', MEETING_ID)
                     .eq('user_id', currentUser.id);
             } catch (error) {
-                console.error('更新說話狀態失敗:', error);
+                console.warn('DB 說話狀態更新不穩定，但不影響 UI');
             }
         }
 
