@@ -108,8 +108,9 @@ serve(async (req) => {
       body: JSON.stringify({
         audio_url: upload_url,
         language_code: language === "zh-TW" ? "zh" : "en",
+        speech_model: "best",
         word_boost: wordBoost || [],
-        boost_param: "high",
+        boost_param: "default",
         punctuate: true,
         format_text: true
       })

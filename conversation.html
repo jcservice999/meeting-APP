@@ -325,9 +325,18 @@
             }
 
             try {
-                const conversationText = allCaptions.map(c =>
-                    `${c.user_name || '未知'}: ${c.text || ''}`
-                ).join('\n');
+                summarySection.style.display = 'block';
+                summaryContent.innerHTML = '<div class="loading">正在分析會議內容並校對數據...</div>';
+
+                // 準備文本與數據輔助
+                const conversationText = allCaptions.map(c => `${c.user_name}: ${c.text || ''}`).join('\n');
+
+                // 額外提取數字作為「數據快照」提醒 AI
+                const numericalContext = allCaptions
+                    .map(c => c.text ? c.text.match(/\d+([,.]\d+)*%?/g) : null)
+                    .filter(matches => matches)
+                    .flat()
+                    .join(', ');
 
                 const response = await fetch(EDGE_FUNCTION_URL, {
                     method: 'POST',
@@ -335,7 +344,20 @@
                         'Content-Type': 'application/json',
                         'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
                     },
-                    body: JSON.stringify({ conversationText })
+                    body: JSON.stringify({
+                        conversationText,
+                        // 提供給 Edge Function 的 Prompt 提示，包含數據校對要求
+                        prompt: `請身為專業的會議記錄秘書，根據以下的對話內容整理一份精簡的「會議重點摘要」。
+                        
+                        ⚠️ 重要數據校對：
+                        以下是從音訊中偵測到的精確數字片段：[${numericalContext}]。
+                        如果在對話文本中有看到發音相近但寫法不同的數字（例如：一百轉為 100），請「優先」參考上述精確數字進行校正。
+                        
+                        摘要請包含：
+                        1. 會議核心主題
+                        2. 決議事項與具體數據（金額、日期、百分比需極其精確）
+                        3. 後續行動清單`
+                    })
                 });
 
                 const result = await response.json();

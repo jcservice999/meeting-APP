@@ -110,13 +110,14 @@
         </div>
 
         <!-- 字幕條 - 固定在底部 -->
-        <div id="captionContainer" class="caption-container">
+        <div class="caption-container" id="captionContainer">
             <div class="caption-header">
-                <span>即時字幕 (多人同步)</span>
-                <button id="toggleCaptions" class="btn-toggle">展開 ▲</button>
+                <span>即時字幕與數據</span>
+                <button id="toggleExpand" class="btn-toggle">展開完整視圖</button>
             </div>
-            <div id="captionBar" class="caption-bar">
-                點擊「開始錄音」開始...
+            <div id="snapshotContainer" class="snapshot-container"></div>
+            <div class="caption-bar" id="captionBar">
+                <!-- 字幕項目將會在這裡動態新增 -->
             </div>
             <div id="captionFull" class="caption-full">
                 <!-- 完整對話顯示 -->
@@ -296,6 +297,31 @@
                     console.log('🔌 字幕訂閱狀態:', status);
                 });
         }
+        function showDataSnapshot(number, context) {
+            console.log('💎 偵測到關鍵數據:', number);
+            const container = document.getElementById('snapshotContainer');
+            if (!container) return;
+
+            // 建立氣泡
+            const bubble = document.createElement('div');
+            bubble.className = 'snapshot-bubble';
+            bubble.textContent = number;
+            bubble.title = `語境："${context}"`;
+
+            // 加入容器
+            container.appendChild(bubble);
+
+            // 15 秒後移除
+            setTimeout(() => {
+                bubble.classList.add('fade-out');
+                setTimeout(() => bubble.remove(), 500);
+            }, 15000);
+
+            // 限制數量，避免過多
+            if (container.children.length > 5) {
+                container.removeChild(container.firstChild);
+            }
+        }
 
         // 載入參與者列表
         async function loadParticipants() {
@@ -382,8 +408,9 @@
 
 
 
-        // AssemblyAI API 語音轉錄設定 (Batch Mode)
-        const SPEECH_API_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
+        // API 設定
+        const ASSEMBLYAI_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
+        const DEEPGRAM_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/deepgram-speech';
 
         let mediaRecorder = null;
         let recordingInterval = null;
@@ -497,7 +524,8 @@
                     const { data: { session } } = await supabaseClient.auth.getSession();
                     if (!session) return;
 
-                    const response = await fetch(SPEECH_API_URL, {
+                    // 1. 呼叫 AssemblyAI (主文字)
+                    const assemblyRequest = fetch(ASSEMBLYAI_URL, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -509,27 +537,41 @@
                             roomId: MEETING_ID,
                             wordBoost: roomWordBoost
                         })
-                    });
+                    }).then(res => res.json());
 
-                    const result = await response.json();
-                    console.log('📡 AssemblyAI 回應:', result);
+                    // 2. 呼叫 Deepgram (數字輔助)
+                    const deepgramRequest = fetch(DEEPGRAM_URL, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${session.access_token}`
+                        },
+                        body: JSON.stringify({
+                            audio: base64Audio,
+                            language: language,
+                            roomId: MEETING_ID
+                        })
+                    }).then(res => res.json());
 
-                    // Webhook 模式：結果會透過 Supabase Realtime 送達
-                    if (result.submitted) {
-                        console.log('📤 已提交轉錄，ID:', result.transcriptId);
-                    } else if (result.transcript && result.transcript.trim()) {
-                        // 輪詢模式
-                        console.log('✅ 辨識:', result.transcript);
+                    // 並行處理
+                    const [aaiResult, dgResult] = await Promise.all([assemblyRequest, deepgramRequest]);
 
-                        // 先用 AI 處理標點，再顯示和儲存
-                        const processedText = await addPunctuation(result.transcript);
-                        showLocalCaption(processedText);
-                        saveCaption(processedText, true); // true = 已處理過，不需再處理
-                    } else {
-                        console.log('⚠️ 無辨識結果（可能是靜音或超時）');
+                    console.log('📡 AssemblyAI:', aaiResult);
+                    console.log('📡 Deepgram:', dgResult);
+
+                    // 處理 Deepgram (數字提取)
+                    if (dgResult.transcript) {
+                        extractAndShowNumbers(dgResult.transcript);
                     }
-                } catch (err) {
-                    console.error('❌ 上傳失敗:', err);
+
+                    // 處理 AssemblyAI
+                    if (aaiResult.transcript && aaiResult.transcript.trim()) {
+                        const speakerName = currentUser?.email?.split('@')[0] || '我';
+                        addCaption(speakerName, aaiResult.transcript, true);
+                    }
+
+                } catch (error) {
+                    console.error('API 處理失敗:', error);
                 }
             };
             reader.readAsDataURL(audioBlob);
