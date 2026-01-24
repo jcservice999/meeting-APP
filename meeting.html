@@ -282,34 +282,46 @@
 
         function handlePresenceSync(state) {
             // 從 Presence 狀態中找尋房主，並同步其 Session 起點
-            const users = Object.values(state).flat();
+            // 修正：不使用 flat()，保留 key (即 user_id) 作為識別依據，解決重複或遺失問題
+
+            participants.clear();
+            let hostFound = null;
+
+            for (const userId in state) {
+                const presences = state[userId];
+                if (presences && presences.length > 0) {
+                    const u = presences[0]; // 同一帳戶多個分頁，以第一個為準
+
+                    const pData = {
+                        user_id: userId,
+                        user_name: u.user_name || '匿名',
+                        photo_url: u.photo_url || null,
+                        is_speaking: u.is_speaking || false,
+                        is_host: u.is_host || false,
+                        session_start_time: u.session_start_time || null
+                    };
+
+                    participants.set(userId, pData);
+
+                    if (u.is_host) hostFound = pData;
+                }
+            }
 
             // 1. 同步房主狀態與 Session 起點
-            const host = users.find(u => u.is_host);
-            if (host && host.session_start_time && !isOwner) {
-                if (sessionStartTime !== host.session_start_time) {
-                    console.log('🔄 同步房主 Session 起點:', host.session_start_time);
-                    sessionStartTime = host.session_start_time;
+            if (hostFound && hostFound.session_start_time && !isOwner) {
+                if (sessionStartTime !== hostFound.session_start_time) {
+                    console.log('🔄 同步房主 Session 起點:', hostFound.session_start_time);
+                    sessionStartTime = hostFound.session_start_time;
                     refreshLiveView();
                 }
             }
 
-            // 2. 🟢 核心修正：將 Presence 名單同步到 participants Map 並更新 UI Grid
-            // 這解決了數據庫延遲、幽靈參與者、以及頭像不顯示的問題
-            participants.clear();
-            users.forEach(u => {
-                participants.set(u.user_id, {
-                    user_id: u.user_id,
-                    user_name: u.user_name,
-                    photo_url: u.photo_url,
-                    is_speaking: u.is_speaking || false
-                });
-            });
-
-            // 3. 即時刷新網格與計數
+            // 2. 🟢 即時刷新網格與計數 (單一來源原則)
             updateParticipantGrid();
-            loadParticipantsFromPresence(users);
-            checkHostStatus(); // 每次同步都檢查一次
+            updateParticipantCount();
+
+            // 3. 檢查主持人是否在線
+            checkHostStatus();
         }
 
         // 強制重新載入當前 Session 視圖
@@ -405,7 +417,7 @@
                 }
 
                 await joinMeeting();
-                await loadParticipants();
+                // await loadParticipants(); // 🟡 已改用 Presence 驅動，不在此載入 DB 名單，防止資料覆蓋
                 await loadRecentHistory();
             } catch (err) {
                 console.warn('Session 初始化異常', err);
@@ -542,11 +554,13 @@
             }
         }
 
-        function triggerHostLeave() {
+        async function triggerHostLeave() {
+            console.log('🚨 執行退場程序...');
+            await leaveMeeting(); // 確保先斷開所有連線與 Presence
             setTimeout(() => {
                 alert('會議主持人已離開，會議結束。');
                 window.location.href = 'index.html';
-            }, 1000);
+            }, 500);
         }
 
         // 訂閱字幕
@@ -607,8 +621,9 @@
             }
         }
 
-        // 載入參與者列表
+        // 載入參與者列表 (歷史用途，現在 UI 由 Presence 驅動)
         async function loadParticipants() {
+            /* 🟡 停用資料庫驅動 UI，改由 handlePresenceSync 接管
             try {
                 const { data, error } = await supabaseClient
                     .from('participants')
@@ -617,15 +632,11 @@
                     .eq('status', 'online');
 
                 if (error) throw error;
-
-                participants.clear();
-                data.forEach(p => participants.set(p.user_id, p));
-
-                updateParticipantGrid();
-                updateParticipantCount();
+                // ...
             } catch (error) {
                 console.error('載入參與者失敗:', error);
             }
+            */
         }
 
         // 載入 Word Boost 關鍵詞
@@ -1591,8 +1602,23 @@
                     .eq('meeting_id', MEETING_ID)
                     .eq('user_id', currentUser.id);
 
-                if (participantsChannel) participantsChannel.unsubscribe();
-                if (captionsChannel) captionsChannel.unsubscribe();
+                if (participantsChannel) {
+                    participantsChannel.unsubscribe();
+                    participantsChannel = null;
+                }
+                if (captionsChannel) {
+                    captionsChannel.unsubscribe();
+                    captionsChannel = null;
+                }
+
+                // 🔴 關鍵修正：離開時必須顯式離開 Room Channel (Presence)
+                // 否則 Presence 狀態會暫留在伺服器上直到超時 (Ghosting 原因)
+                if (window.roomChannel) {
+                    console.log('👋 正在切斷 Presence 連線...');
+                    await window.roomChannel.untrack();
+                    window.roomChannel.unsubscribe();
+                    window.roomChannel = null;
+                }
 
                 // 斷開 PeerJS 語音
                 if (peer) {
