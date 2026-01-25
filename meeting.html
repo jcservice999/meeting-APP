@@ -1275,7 +1275,11 @@
 
         // 檢測說話
         function detectSpeaking() {
-            if (!analyser) return;
+            if (!analyser || !isRecording) { // 🟢 錄音停止時立即退出，防止殘留綠框
+                isSpeaking = false;
+                updateSpeakingStatus(false);
+                return;
+            }
 
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
@@ -1286,8 +1290,6 @@
             audioLevel = average; // 更新全域變數以供日誌顯示
 
             if (speaking) {
-                // 🟢 核心改進：只要偵測到聲音，立即標記本次週期為有效
-                // 這樣就不會因為 dataavailable 的間隔而漏掉短促的說話
                 speakingActivityDetected = true;
             }
 
@@ -1297,7 +1299,6 @@
             }
 
             // 🟢 優化：改用 setTimeout 而非 requestAnimationFrame
-            // 確保在瀏覽器分頁切換到背景時，偵測邏輯依然能以穩定頻率執行
             setTimeout(detectSpeaking, 100);
         }
 
@@ -1558,6 +1559,10 @@
 
         // 停止錄音
         function stopRecording() {
+            isRecording = false; // 🟢 優先設為 false，讓 detectSpeaking 等循環能偵測並退出
+            isSpeaking = false;
+            updateSpeakingStatus(false);
+
             if (recognition) {
                 try {
                     recognition.stop();
@@ -1573,9 +1578,6 @@
                     console.error('關閉音訊上下文失敗:', e);
                 }
             }
-            isRecording = false;
-            isSpeaking = false;
-            updateSpeakingStatus(false);
             document.getElementById('startBtn').textContent = '開始錄音';
             document.getElementById('startBtn').classList.remove('btn-danger');
             document.getElementById('startBtn').classList.add('btn-primary');
