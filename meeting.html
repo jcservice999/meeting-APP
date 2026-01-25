@@ -707,6 +707,7 @@
         // API 設定
         const ASSEMBLYAI_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
         const DEEPGRAM_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/deepgram-speech';
+        const GROQ_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/groq-speech';
 
         let mediaRecorder = null;
         let recordingInterval = null;
@@ -820,31 +821,10 @@
                     const { data: { session } } = await supabaseClient.auth.getSession();
                     if (!session) return;
 
-                    console.log('📤 同步呼叫 AssemblyAI 與 Deepgram...');
+                    console.log('📤 呼叫 Groq (Whisper v3 Turbo) 進行高精確度轉錄...');
 
-                    // 1. 呼叫 AssemblyAI (主文字)
-                    const assemblyRequest = fetch(ASSEMBLYAI_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${session.access_token}`
-                        },
-                        body: JSON.stringify({
-                            audio: base64Audio,
-                            language: language,
-                            roomId: MEETING_ID,
-                            wordBoost: roomWordBoost
-                        })
-                    }).then(async res => {
-                        if (!res.ok) {
-                            const errText = await res.text().catch(() => 'No body');
-                            throw new Error(`Status ${res.status}: ${errText}`);
-                        }
-                        return res.json();
-                    }).catch(err => ({ error: 'AssemblyAI 呼叫失敗: ' + err.message }));
-
-                    // 2. 呼叫 Deepgram (數字輔助)
-                    const deepgramRequest = fetch(DEEPGRAM_URL, {
+                    // 呼叫 Groq 函數
+                    const response = await fetch(GROQ_URL, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
@@ -855,29 +835,29 @@
                             language: language,
                             roomId: MEETING_ID
                         })
-                    }).then(res => res.json()).catch(err => ({ error: 'Deepgram 呼叫失敗: ' + err.message }));
+                    });
 
-                    // 並行取得結果
-                    const [aaiResult, dgResult] = await Promise.all([assemblyRequest, deepgramRequest]);
+                    if (!response.ok) {
+                        const errText = await response.text().catch(() => 'No body');
+                        throw new Error(`Status ${response.status}: ${errText}`);
+                    }
 
-                    if (dgResult.error) console.warn('⚠️ Deepgram 錯誤:', dgResult.error);
-                    else console.log('🎯 Deepgram 辨識成功:', dgResult.transcript);
+                    const result = await response.json();
 
-                    if (aaiResult.error) console.error('❌ AssemblyAI 錯誤:', aaiResult.error);
-                    else console.log('📝 AssemblyAI 辨識成功:', aaiResult.transcript);
+                    if (result.error) {
+                        console.error('❌ Groq 錯誤:', result.error);
+                        return;
+                    }
 
-                    // 處理數據提取 (整合兩邊結果提升精準度)
-                    const dgText = (dgResult && dgResult.transcript) ? dgResult.transcript : "";
-                    const aaiText = (aaiResult && aaiResult.transcript) ? aaiResult.transcript : "";
+                    console.log('🎯 Groq 辨識成功:', result.transcript);
 
-                    // 從兩個結果中都提取標籤並合併去重
-                    const tagsFromDg = getNumericalTags(dgText);
-                    const tagsFromAai = getNumericalTags(aaiText);
-                    const numericalTags = [...new Set([...tagsFromDg, ...tagsFromAai])];
+                    const transcript = result.transcript || "";
+                    if (transcript.trim()) {
+                        // 處理數據提取
+                        const numericalTags = getNumericalTags(transcript);
 
-                    if (aaiText || dgText) {
-                        // 使用現有的加標點功能
-                        let processedText = await addPunctuation(aaiText || dgText);
+                        // 使用現有的加標點功能（雖然 Whisper 已經有標點，但過一次校正更穩）
+                        let processedText = await addPunctuation(transcript);
 
                         if (processedText) {
                             showLocalCaption(processedText, numericalTags);

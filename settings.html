@@ -374,8 +374,13 @@
             </div>
             <div class="alert alert-info"
                 style="background: linear-gradient(145deg, rgba(56, 178, 172, 0.15) 0%, rgba(45, 122, 118, 0.1) 100%); border-color: rgba(56, 178, 172, 0.3);">
-                🎯 <strong>Deepgram</strong>：註冊即送 $200 額度（約 <strong>430 小時</strong>）。專門捕捉精準數字數據。
+                🎯 <strong>Deepgram</strong>：註冊即送 $200 額度。適合低延遲捕捉。
                 <a href="https://console.deepgram.com/signup" target="_blank">註冊 →</a>
+            </div>
+            <div class="alert alert-info"
+                style="background: linear-gradient(145deg, rgba(237, 137, 54, 0.15) 0%, rgba(221, 107, 32, 0.1) 100%); border-color: rgba(237, 137, 54, 0.3);">
+                🚀 <strong>Groq (Whisper v3 Turbo)</strong>：極速、高精確度數字辨識。目前提供優渥的免費額度。
+                <a href="https://console.groq.com/" target="_blank">註冊 →</a>
             </div>
         </div>
 
@@ -408,7 +413,8 @@
                     <label class="form-label">選擇服務商</label>
                     <select class="form-input" id="apiProvider" onchange="updateApiKeyPlaceholder()" required>
                         <option value="assemblyai">AssemblyAI (主字幕)</option>
-                        <option value="deepgram">Deepgram (數字輔助)</option>
+                        <option value="deepgram">Deepgram (音訊捕捉)</option>
+                        <option value="groq">Groq (Whisper v3 Turbo - 數字強項)</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -491,10 +497,12 @@
                     cardClass += ' active';
                 }
 
-                const providerName = account.provider === 'assemblyai' ? 'AssemblyAI' : 'Deepgram';
+                const providerName = account.provider === 'assemblyai' ? 'AssemblyAI' : (account.provider === 'groq' ? 'Groq' : 'Deepgram');
                 const providerBadge = account.provider === 'assemblyai' ?
                     '<span class="account-badge" style="background: rgba(128, 90, 213, 0.1); color: #805ad5; border: 1px solid rgba(128, 90, 213, 0.2);">主字幕</span>' :
-                    '<span class="account-badge" style="background: rgba(56, 178, 172, 0.1); color: #38b2ac; border: 1px solid rgba(56, 178, 172, 0.2);">數字輔助</span>';
+                    (account.provider === 'groq' ?
+                        '<span class="account-badge" style="background: rgba(237, 137, 54, 0.1); color: #dd6b20; border: 1px solid rgba(237, 137, 54, 0.2);">最高精確度</span>' :
+                        '<span class="account-badge" style="background: rgba(56, 178, 172, 0.1); color: #38b2ac; border: 1px solid rgba(56, 178, 172, 0.2);">數字輔助</span>');
 
                 return `
                     <div class="${cardClass}">
