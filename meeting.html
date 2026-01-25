@@ -774,14 +774,15 @@
 
                 mediaRecorder.onstop = async () => {
                     const chunksToProcess = [...audioChunks];
+                    const hadSpeech = speakingActivityDetected; // 🟢 先捕捉本週期的偵測結果
 
-                    // 立即開始下一段，不要等待上傳完成
+                    // 立即開始下一段，recordNextChunk 會重置全域的 speakingActivityDetected
                     if (isRecording) {
                         recordNextChunk();
                     }
 
-                    // 🔴 幻覺預防：如果這 20 秒內完全沒人說話，直接放棄這段音訊，不丟 API
-                    if (!speakingActivityDetected) {
+                    // 🔴 幻覺預防：使用剛才捕捉的 hadSpeech 進行判斷
+                    if (!hadSpeech) {
                         console.log('🔇 本週期完全無聲音活動，跳過 API 調用 (防止幻覺)');
                         return;
                     }
