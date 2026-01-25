@@ -369,34 +369,58 @@
 
         <div style="display: flex; flex-direction: column; gap: 0.8rem; margin-bottom: 1.5rem;">
             <div class="alert alert-info">
-                💡 <strong>AssemblyAI</strong>：提供 333 小時串流額度。適合主字幕。
+                <svg style="width:18px;height:18px;vertical-align:middle;margin-right:6px;" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+                <strong>AssemblyAI</strong>：提供 333 小時串流額度。適合主字幕。
                 <a href="https://www.assemblyai.com/" target="_blank">註冊 →</a>
             </div>
             <div class="alert alert-info"
-                style="background: linear-gradient(145deg, rgba(56, 178, 172, 0.15) 0%, rgba(45, 122, 118, 0.1) 100%); border-color: rgba(56, 178, 172, 0.3);">
-                🎯 <strong>Deepgram</strong>：註冊即送 $200 額度。適合低延遲捕捉。
-                <a href="https://console.deepgram.com/signup" target="_blank">註冊 →</a>
-            </div>
-            <div class="alert alert-info"
-                style="background: linear-gradient(145deg, rgba(237, 137, 54, 0.15) 0%, rgba(221, 107, 32, 0.1) 100%); border-color: rgba(237, 137, 54, 0.3);">
-                🚀 <strong>Groq (Whisper v3 Turbo)</strong>：極速、高精確度數字辨識。目前提供優渥的免費額度。
+                style="background: linear-gradient(145deg, rgba(159, 122, 234, 0.15) 0%, rgba(128, 90, 213, 0.1) 100%); border-color: rgba(159, 122, 234, 0.3);">
+                <svg style="width:18px;height:18px;vertical-align:middle;margin-right:6px;" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                </svg>
+                <strong>Whisper v3 Turbo</strong>：極速、高精確度數字辨識。目前提供優渥的免費額度。
                 <a href="https://console.groq.com/" target="_blank">註冊 →</a>
             </div>
         </div>
 
         <div class="alert alert-warning">
-            ⚠️ 您的 API Key 會安全地儲存在資料庫中。當額度用完時，系統會自動切換到下一個可用的 API Key。
+            <svg style="width:18px;height:18px;vertical-align:middle;margin-right:6px;" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" stroke-width="2">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                <line x1="12" y1="9" x2="12" y2="13" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            您的 API Key 會安全地儲存在資料庫中。當額度用完時，系統會自動切換到下一個可用的 API Key。
         </div>
 
         <div style="margin-bottom: 1.5rem;">
-            <button class="btn btn-primary" onclick="showAddModal()">+ 新增 API Key</button>
+            <button class="btn btn-primary" onclick="showAddModal()">
+                <svg style="width:18px;height:18px;vertical-align:middle;margin-right:4px;" viewBox="0 0 24 24"
+                    fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19" />
+                    <line x1="5" y1="12" x2="19" y2="12" />
+                </svg>新增 API Key
+            </button>
         </div>
 
         <div id="accountList" class="account-list">
             <div class="empty-state">
-                <div class="empty-state-icon">🔑</div>
+                <div class="empty-state-icon">
+                    <svg style="width:48px;height:48px;margin: 0 auto 1rem; display: block;" viewBox="0 0 24 24"
+                        fill="none" stroke="#a0aec0" stroke-width="2">
+                        <path
+                            d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.78-7.78 5.5 5.5 0 0 1 7.78 7.78zM12 7l.34 2.66c.05.34.34.56.66.56H16l-2.34 1.66c-.28.2-.34.6-.2.88L14.34 16 12 14.34 9.66 16l.88-2.34c.14-.28.08-.68-.2-.88L8 10.22h3c.32 0 .61-.22.66-.56L12 7z" />
+                    </svg>
+                </div>
                 <p>尚未新增任何 API Key</p>
-                <p>點擊上方按鈕新增您的 AssemblyAI API Key</p>
+                <p>點擊上方按鈕新增您的 AssemblyAI 或 Whisper API Key</p>
             </div>
         </div>
     </div>
@@ -413,8 +437,7 @@
                     <label class="form-label">選擇服務商</label>
                     <select class="form-input" id="apiProvider" onchange="updateApiKeyPlaceholder()" required>
                         <option value="assemblyai">AssemblyAI (主字幕)</option>
-                        <option value="deepgram">Deepgram (音訊捕捉)</option>
-                        <option value="groq">Groq (Whisper v3 Turbo - 數字強項)</option>
+                        <option value="groq">Whisper v3 Turbo (數字強項)</option>
                     </select>
                 </div>
                 <div class="form-group">
