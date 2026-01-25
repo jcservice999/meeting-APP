@@ -708,8 +708,8 @@
 
         // API 設定
         const ASSEMBLYAI_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/assemblyai-speech';
-        const DEEPGRAM_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/deepgram-speech';
         const GROQ_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/groq-speech';
+        const GEMINI_PUNCTUATION_URL = 'https://inzqsdelrwxxlbcumaiw.supabase.co/functions/v1/gemini-punctuation';
 
         let mediaRecorder = null;
         let recordingInterval = null;
@@ -728,8 +728,8 @@
                     audioStream = streamToUse;
                 }
 
-                console.log('✅ Groq 轉錄引擎已啟動');
-                showInterimCaption('模式：高精確度數據轉錄 (每 20 秒)...');
+                console.log('✅ STT 整合引擎已啟動 (AssemblyAI + Groq + Gemini)');
+                showInterimCaption('模式：高精確度人名與數據辨識 (每 20 秒)...');
 
                 isRecording = true;
 
@@ -817,38 +817,82 @@
                     const { data: { session } } = await supabaseClient.auth.getSession();
                     if (!session) return;
 
-                    console.log('📤 請求 Groq (Whisper v3 Turbo) 轉錄');
+                    console.log('📤 同步呼叫 AssemblyAI (文字) 與 Groq (數字)...');
 
-                    // 呼叫 Groq 函數
-                    const response = await fetch(GROQ_URL, {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${session.access_token}`
-                        },
-                        body: JSON.stringify({
-                            audio: base64Audio,
-                            language: language,
-                            roomId: MEETING_ID
+                    // 1. 並行呼叫 AssemblyAI 與 Groq
+                    const [assemblyRes, groqRes] = await Promise.all([
+                        fetch(ASSEMBLYAI_URL, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session.access_token}`
+                            },
+                            body: JSON.stringify({
+                                audio: base64Audio,
+                                language: language,
+                                roomId: MEETING_ID,
+                                wordBoost: roomWordBoost // 支援人名關鍵字
+                            })
+                        }),
+                        fetch(GROQ_URL, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session.access_token}`
+                            },
+                            body: JSON.stringify({
+                                audio: base64Audio,
+                                language: language,
+                                roomId: MEETING_ID
+                            })
                         })
-                    });
+                    ]);
 
-                    if (!response.ok) throw new Error(`Groq API error: ${response.status}`);
+                    let mainText = "";
+                    let numericalTags = [];
 
-                    const result = await response.json();
-                    if (result.error || !result.transcript) return;
-
-                    console.log('🎯 Groq 轉錄成功:', result.transcript);
-
-                    const transcript = result.transcript.trim();
-                    if (transcript) {
-                        // 🟢 唯一來源：數值標籤與文字全部來自 Groq
-                        const numericalTags = getNumericalTags(transcript);
-
-                        // 🔴 徹底移除 addPunctuation，直接顯示 Groq 原文
-                        showLocalCaption(transcript, numericalTags);
-                        saveCaption(transcript, true);
+                    // 處理 AssemblyAI 結果 (主文字來源)
+                    if (assemblyRes.ok) {
+                        const aaiBody = await assemblyRes.json();
+                        mainText = (aaiBody.transcript || "").trim();
+                        console.log('🎯 AssemblyAI 辨識結果:', mainText);
                     }
+
+                    // 處理 Groq 結果 (數字標籤來源)
+                    if (groqRes.ok) {
+                        const groqBody = await groqRes.json();
+                        const groqTranscript = groqBody.transcript || "";
+                        numericalTags = getNumericalTags(groqTranscript);
+                        console.log('🎯 Groq 偵測數字標籤:', numericalTags);
+                    }
+
+                    if (!mainText) return;
+
+                    // 2. 呼叫 Gemini 進行標點符號與錯字修飾
+                    console.log('✨ 請求 Gemini 優化標點與錯字...');
+                    let refinedText = mainText;
+                    try {
+                        const geminiRes = await fetch(GEMINI_PUNCTUATION_URL, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                                'Authorization': `Bearer ${session.access_token}`
+                            },
+                            body: JSON.stringify({ text: mainText })
+                        });
+
+                        if (geminiRes.ok) {
+                            const geminiBody = await geminiRes.json();
+                            refinedText = geminiBody.result || mainText;
+                            console.log('✅ Gemini 校正完成:', refinedText);
+                        }
+                    } catch (gemError) {
+                        console.warn('⚠️ Gemini 校正失敗，使用原文字:', gemError);
+                    }
+
+                    // 3. 顯示與儲存
+                    showLocalCaption(refinedText, numericalTags);
+                    saveCaption(refinedText, true);
 
                 } catch (error) {
                     console.error('音频處理邏輯重大錯誤:', error);
