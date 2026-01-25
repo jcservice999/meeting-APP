@@ -764,11 +764,7 @@
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         audioChunks.push(event.data);
-
-                        // 🟢 VAD 檢查：如果目前正在說話 (analyser 判定)，標記此區段有效
-                        if (isSpeaking) {
-                            speakingActivityDetected = true;
-                        }
+                        // 🟢 VAD 檢查已移至 detectSpeaking 實時處理
                     }
                 };
 
@@ -1223,13 +1219,23 @@
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
 
-            const speaking = average > 25;
+            // 🟢 優化：降低門檻值 (25 -> 15)，讓輕微說話也能被捕捉
+            const speaking = average > 15;
+
+            if (speaking) {
+                // 🟢 核心改進：只要偵測到聲音，立即標記本次週期為有效
+                // 這樣就不會因為 dataavailable 的間隔而漏掉短促的說話
+                speakingActivityDetected = true;
+            }
+
             if (speaking !== isSpeaking) {
                 isSpeaking = speaking;
                 updateSpeakingStatus(speaking);
             }
 
-            animationId = requestAnimationFrame(detectSpeaking);
+            // 🟢 優化：改用 setTimeout 而非 requestAnimationFrame
+            // 確保在瀏覽器分頁切換到背景時，偵測邏輯依然能以穩定頻率執行
+            setTimeout(detectSpeaking, 100);
         }
 
         // 更新說話狀態
