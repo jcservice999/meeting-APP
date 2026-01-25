@@ -1275,18 +1275,14 @@
 
         // 檢測說話
         function detectSpeaking() {
-            if (!analyser || !isRecording) { // 🟢 錄音停止時立即退出，防止殘留綠框
-                isSpeaking = false;
-                updateSpeakingStatus(false);
-                return;
-            }
+            if (!analyser) return;
 
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
 
-            // 🟢 優化：降低門檻值 (5)，讓更細微說話也能被捕捉
-            const speaking = average > 5;
+            // 🟢 優化：只有在錄音啟動中才觸發亮框，但偵測循環本身永不中斷
+            const speaking = average > 5 && isRecording;
             audioLevel = average; // 更新全域變數以供日誌顯示
 
             if (speaking) {
@@ -1298,7 +1294,7 @@
                 updateSpeakingStatus(speaking);
             }
 
-            // 🟢 優化：改用 setTimeout 而非 requestAnimationFrame
+            // 🟢 保持循環穩定運行，防死結
             setTimeout(detectSpeaking, 100);
         }
 

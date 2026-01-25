@@ -38,7 +38,7 @@ serve(async (req) => {
       });
     }
 
-    console.log("收到文字，長度:", originalText.length);
+    console.log("收到文字，準備進行「強力標點」校正");
 
     const response = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
@@ -48,28 +48,33 @@ serve(async (req) => {
         body: JSON.stringify({
           contents: [{
             parts: [{
-              text: `請修正以下錄音轉錄的繁體中文稿，重點是添加正確的標點符號。
+              text: `你現在是一位專門處理「口語轉錄稿」的繁體中文校對大師。你的目標是將一段雜亂無章、完全沒有標點的文字，轉化為易讀且標點正確的對話記錄。
 
-任務說明：
-1. 為文字添加適當的繁體中文標點符號（，。？！），讓長句易於閱讀。
-2. 修正語氣助詞（啊、呢、喔、嗎）後的標點。
-3. 修正明顯的同音字錯誤（的/地/得、在/再）。
-4. 保留原始口語內容，不要改寫成正式文章。
+任務規則 (必須嚴格遵守)：
+1. 【強制添加標點】：務必添加大量的逗點（，）、句點（。）、問號（？）或驚嘆號（！）。
+2. 【語氣助詞處理】：在「啊、呢、喔、吧、嗎、啦、唷」等語氣助詞後面，必須加上標點符號。
+3. 【禁止刪減】：絕對不要刪除任何一個字（包括發語詞與髒話都必須保留），也不要改寫語句。
+4. 【同音字修正】：修正明顯的錯別字（如：的/地/得、或是同音異字）。
 
-範例：
-輸入：大家好今天天氣不錯吧我們要去哪裡
-輸出：大家好，今天天氣不錯吧？我們要去哪裡？
+範例示範：
+輸入：欸你有聽說嗎那個人真的超級雞巴的啦我就說不用理他啊對不對
+輸出：欸！你有聽說嗎？那個人真的超級雞巴的啦！我就說不用理他啊，對不對？
 
-絕對規則：
-- 只輸出修正後的文字，不要有任何解釋。
+輸入：鮑魚這個藍光我是買防藍光的真的喔嗯阿姨也喜歡藍光的
+輸出：鮑魚這個藍光，我是買防藍光的。真的喔？嗯，阿姨也喜歡藍光的。
+
+輸入：要怎麼拆啊拆不起來有了有了拆起來了這個都已經破成這樣了對不起
+輸出：要怎麼拆啊？拆不起來！有了、有了！拆起來了。這個都已經破成這樣了，對不起。
+
+絕對規則：只輸出校對後的文字，不要有任何開場白或備註。
 
 原文內容：
 ${originalText}`
             }]
           }],
           generationConfig: {
-            temperature: 0.2,
-            maxOutputTokens: 2000
+            temperature: 0.3,
+            maxOutputTokens: 2048
           }
         })
       }
@@ -85,7 +90,6 @@ ${originalText}`
     }
 
     const result = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || originalText;
-    console.log("校正成功");
 
     return new Response(JSON.stringify({ result, success: true }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
