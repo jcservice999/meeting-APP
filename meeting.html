@@ -733,6 +733,11 @@
 
                 isRecording = true;
 
+                // 🟢 確保分析器環境已啟動
+                if (audioContext && audioContext.state === 'suspended') {
+                    await audioContext.resume();
+                }
+
                 // 啟動錄音循環
                 startRecordingLoop(streamToUse);
                 return true;
@@ -764,7 +769,6 @@
                 mediaRecorder.ondataavailable = (event) => {
                     if (event.data.size > 0) {
                         audioChunks.push(event.data);
-                        // 🟢 VAD 檢查已移至 detectSpeaking 實時處理
                     }
                 };
 
@@ -791,7 +795,7 @@
                     processAudioChunk(audioBlob, language);
                 };
 
-                mediaRecorder.start(1000); // 🟢 每秒觸發一次 dataavailable 用於檢查 isSpeaking
+                mediaRecorder.start(); // 恢復預設錄音模式
 
                 // 定時停止並觸發轉錄
                 setTimeout(() => {
@@ -1186,13 +1190,17 @@
         // 初始化說話者檢測
         async function initSpeakerDetection() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: {
-                        echoCancellation: true,
-                        noiseSuppression: true,
-                        autoGainControl: true
-                    }
-                });
+                // 優先使用現有的 localStream，避免重複請求麥克風導致衝突
+                let stream = localStream;
+                if (!stream || !stream.active) {
+                    stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            echoCancellation: true,
+                            noiseSuppression: true,
+                            autoGainControl: true
+                        }
+                    });
+                }
 
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
@@ -1204,6 +1212,15 @@
 
                 detectSpeaking();
                 console.log('✅ 說話者檢測已初始化');
+
+                // 🟢 隨時追蹤最高音量以便診斷
+                window.lastMaxAverage = 0;
+                setInterval(() => {
+                    if (isRecording) {
+                        console.log(`📊 目前音量: [${Math.round(audioLevel)}] (門檻: 5)`);
+                    }
+                }, 2000);
+
                 return true;
             } catch (error) {
                 console.error('無法存取麥克風:', error);
@@ -1219,8 +1236,9 @@
             analyser.getByteFrequencyData(dataArray);
             const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
 
-            // 🟢 優化：降低門檻值 (25 -> 15)，讓輕微說話也能被捕捉
-            const speaking = average > 15;
+            // 🟢 優化：降低門檻值 (5)，讓更細微說話也能被捕捉
+            const speaking = average > 5;
+            audioLevel = average; // 更新全域變數以供日誌顯示
 
             if (speaking) {
                 // 🟢 核心改進：只要偵測到聲音，立即標記本次週期為有效
